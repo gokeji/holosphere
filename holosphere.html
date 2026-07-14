@@ -621,6 +621,17 @@ function feedHandRotation(lm){
   const raw = handQuaternion(lm);
   const now = performance.now() / 1000;
   if(!prevHandQ){ prevHandQ = raw.clone(); lastFeedT = now; return; }
+  // A fist does not provide a stable palm basis: curled fingers can occlude
+  // MCP landmarks and make MediaPipe report a large, false palm rotation.
+  // While gripping (or changing grip), retain only the sphere's idle spin and
+  // keep rebasing so releasing the fist cannot inject a deferred delta.
+  if(state.targetOpen < 0.45 || state.openVel > 0.012){
+    prevHandQ.copy(raw);
+    lastFeedT = now;
+    state.handVel.set(0, 0, 0);
+    state.rotSpeed = 0;
+    return;
+  }
   const fdt = THREE.MathUtils.clamp(now - lastFeedT, 1/120, 1/10);
   lastFeedT = now;
   hemisphere(raw, prevHandQ);
