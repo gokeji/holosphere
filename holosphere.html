@@ -146,7 +146,7 @@
 </div>
 
 <div class="hud" id="hud-br">
-  <div>ROT <span id="rot-val">0.00</span> RAD</div>
+  <div>ROT <span id="rot-val">0.00</span> RAD <span id="orient-val" style="opacity:.6">AUTO</span></div>
   <div>PARTICLES 12,000</div>
   <div>MODE <span id="mode-val">STANDBY</span></div>
 </div>
@@ -451,6 +451,7 @@ const state = {
   hasHand: false, mode: 'standby',
   velRot: 0, lastPalmX: null,
   radius: 1.4, radiusVel: 0,
+  targetQuat: new THREE.Quaternion(),   // hand-derived orientation
 };
 
 const $ = id => document.getElementById(id);
@@ -466,6 +467,21 @@ function handOpenness(lm){
   for(const t of tips) ext += dist(lm[t], lm[0]) / scale;
   ext /= tips.length;                                // ~1.1 fist → ~2.05 open
   return THREE.MathUtils.clamp((ext - 1.15) / 0.85, 0, 1);
+}
+
+/* ----- hand orientation → quaternion -----
+   Build an orthonormal basis from the palm: knuckle line (x), wrist→middle (y),
+   palm normal (z). Mirrored to match the on-screen (flipped) camera preview. */
+const _v = p => new THREE.Vector3(-(p.x - 0.5), -(p.y - 0.5), -(p.z || 0));
+function handQuaternion(lm){
+  const wrist = _v(lm[0]), indexMcp = _v(lm[5]), pinkyMcp = _v(lm[17]), middleMcp = _v(lm[9]);
+  let xAxis = new THREE.Vector3().subVectors(pinkyMcp, indexMcp);
+  let yAxis = new THREE.Vector3().subVectors(middleMcp, wrist);
+  let zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
+  xAxis.crossVectors(yAxis, zAxis).normalize();
+  yAxis.normalize();
+  const m = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
+  return new THREE.Quaternion().setFromRotationMatrix(m);
 }
 
 /* ----- landmark preview drawing ----- */
@@ -512,8 +528,8 @@ async function startTracking(){
         const cy = (lm[0].y + lm[5].y + lm[9].y + lm[13].y + lm[17].y)/5;
         state.tx = (0.5 - cx) * -6.0;          // mirror: hand right → sphere right
         state.ty = (0.5 - cy) *  4.0 + 0.55;
-        // horizontal palm velocity adds spin
-        if(state.lastPalmX !== null) state.velRot += (state.lastPalmX - cx) * 4.0;
+        // full hand rotation → sphere orientation (only applied while a hand is seen)
+        state.targetQuat = handQuaternion(lm);
         state.lastPalmX = cx;
         drawHand(lm);
       } else drawHand(null);
@@ -574,9 +590,12 @@ function animate(){
 
   /* smooth openness + spring the radius (gives it satisfying inertia) */
   state.openness += (state.targetOpen - state.openness) * Math.min(1, dt*10);
-  const targetRadius = 0.9 + state.openness * 2.3;
-  const spring = (targetRadius - state.radius) * 55;
-  state.radiusVel = (state.radiusVel + spring*dt) * Math.exp(-6*dt);
+  // normal breathing range, plus an accelerating "engulf" term near full openness
+  // that pushes the shell out past the camera so the particles surround the viewer
+  const engulf = Math.pow(Math.max(0, (state.openness - 0.78) / 0.22), 2) * 11.0;
+  const targetRadius = 0.9 + state.openness * 2.6 + engulf;
+  const spring = (targetRadius - state.radius) * 40;
+  state.radiusVel = (state.radiusVel + spring*dt) * Math.exp(-5.5*dt);
   state.radius += state.radiusVel*dt;
   sphereUniforms.uRadius.value = state.radius;
   sphereUniforms.uChaos.value  = 1 - state.openness;
@@ -592,24 +611,32 @@ function animate(){
   sphere.position.x += (state.tx - sphere.position.x) * Math.min(1, dt*6);
   sphere.position.y += (state.ty - sphere.position.y) * Math.min(1, dt*6);
 
-  /* rotation: idle spin + hand-flick momentum */
-  state.velRot *= Math.exp(-1.2*dt);
-  sphere.rotation.y += (0.25 + state.velRot) * dt * (reduceMotion ? 0.4 : 1);
+  /* rotation: directly track hand orientation while it's "held", otherwise self-rotate */
+  const beingHeld = state.mode === 'gesture' && state.hasHand;
+  if(beingHeld){
+    sphere.quaternion.slerp(state.targetQuat, Math.min(1, dt*9));
+  } else {
+    state.velRot *= Math.exp(-1.2*dt);
+    const idleSpeed = (0.22 + state.velRot) * dt * (reduceMotion ? 0.4 : 1);
+    const idleQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), idleSpeed);
+    sphere.quaternion.premultiply(idleQ);
+  }
   ringA.rotation.y += dt*0.9;  ringB.rotation.y -= dt*1.3;
-  const ringScale = state.radius * 1.28;
+  const softR = Math.sqrt(Math.max(state.radius, 0.01)) * 1.9; // dampened curve for secondary elements
+  const ringScale = softR;
   ringA.scale.setScalar(ringScale); ringB.scale.setScalar(ringScale*0.92);
   ringA.material.uniforms.uOp.value = ringB.material.uniforms.uOp.value = 0.25 + state.openness*0.75;
-  halo.scale.setScalar(4 + state.radius*2.2);
+  halo.scale.setScalar(4 + softR*2.2);
   halo.material.opacity = 0.55 + state.openness*0.35;
 
   /* beam follows sphere base, stretches to reach it */
-  const topY = sphere.position.y - state.radius*0.4;
+  const topY = sphere.position.y - softR*0.4;
   const h = Math.max(0.8, topY - EMITTER_Y);
-  beam.scale.set(state.radius*0.55 + 0.35, h/3.2, state.radius*0.55 + 0.35);
+  beam.scale.set(softR*0.55 + 0.35, h/3.2, softR*0.55 + 0.35);
   beam.position.set(sphere.position.x*0.9, EMITTER_Y + h/2, 0);
   beamMat.uniforms.uStrength.value = 0.5 + state.openness*0.8;
   emitterGlow.position.x = sphere.position.x*0.9;
-  emitterGlow.scale.set(1.6 + state.radius, 0.45 + state.radius*0.2, 1);
+  emitterGlow.scale.set(1.6 + softR, 0.45 + softR*0.2, 1);
   gridHelper.rotation.y = t*0.08;
 
   /* random hologram glitch */
@@ -628,7 +655,9 @@ function animate(){
   const pct = Math.round(state.openness*100);
   $('ap-fill').style.width = pct + '%';
   $('ap-val').textContent = state.mode==='standby' ? '—' : pct.toString().padStart(3,'0');
-  $('rot-val').textContent = (sphere.rotation.y % (Math.PI*2)).toFixed(2);
+  const _euler = new THREE.Euler().setFromQuaternion(sphere.quaternion, 'YXZ');
+  $('rot-val').textContent = (_euler.y % (Math.PI*2)).toFixed(2);
+  $('orient-val').textContent = beingHeld ? 'LOCKED' : 'AUTO';
   const tr = $('hud-tr');
   if(state.mode==='gesture'){
     tr.classList.toggle('locked', state.hasHand);
