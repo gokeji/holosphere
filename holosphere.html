@@ -251,10 +251,14 @@ const sphereMat = new THREE.ShaderMaterial({
     attribute float aSeed;
     attribute float aShell;
     uniform float uTime, uRadius, uChaos, uPulse, uPixel;
-    varying float vSeed, vShade, vShell;
+    varying float vSeed, vShade, vShell, vKeep;
 
     void main(){
       vSeed = aSeed; vShell = aShell;
+      // thinning mask for the condensed form: core particles (seed<0.2) always
+      // survive, but ~55% of ring particles fade away so the torus stays
+      // translucent and the glowing core inside remains visible
+      vKeep = (aSeed < 0.2 || aSeed > 0.64) ? 1.0 : 0.0;
       vec3 d = aDir;
 
       // gentle coherent shimmer (no more violent per-particle swirl)
@@ -301,7 +305,7 @@ const sphereMat = new THREE.ShaderMaterial({
   fragmentShader:`
     uniform float uTime, uChaos;
     uniform vec3 uColA, uColB;
-    varying float vSeed, vShade, vShell;
+    varying float vSeed, vShade, vShell, vKeep;
 
     void main(){
       vec2 p = gl_PointCoord - 0.5;
@@ -314,7 +318,10 @@ const sphereMat = new THREE.ShaderMaterial({
       alpha *= 0.65 + 0.35*sin(uTime*(6.0+vSeed*14.0) + vSeed*80.0);
       // prevent additive washout when condensed
       float k = smoothstep(0.45, 0.95, uChaos);
-      alpha *= 1.0 - 0.4*k;
+      alpha *= 1.0 - 0.25*k;
+      // dissolve the masked ring particles as the form condenses,
+      // keeping the collapsed torus see-through
+      alpha *= mix(1.0, vKeep, k);
 
       vec3 col = mix(uColA, uColB, vSeed*0.55 + vShade*0.35);
       col += vec3(0.9,0.95,1.0) * pow(vShade, 3.0) * 0.6;   // rim sparkle
@@ -467,6 +474,7 @@ const state = {
   hasHand: false, mode: 'standby',
   velRot: 0, lastPalmX: null,
   radius: 1.4, radiusVel: 0,
+  spinAngle: 0,                         // ever-accumulating baseline spin
   targetQuat: new THREE.Quaternion(),   // hand-derived orientation
 };
 
@@ -476,13 +484,20 @@ const toast = (msg)=>{ const t=$('toast'); t.textContent=msg; t.classList.add('s
 
 /* ----- hand math ----- */
 const dist = (a,b)=>Math.hypot(a.x-b.x, a.y-b.y, (a.z||0)-(b.z||0));
+/* Orientation-invariant openness: per-finger "straightness" is the ratio of the
+   straight-line MCP→tip distance to the summed bone lengths of that finger.
+   Being a ratio of distances measured in the same frame, it is unaffected by
+   hand rotation, scale, or distance to the camera — open hand ≈ 1.0, fist ≈ 0.45. */
+function fingerStraightness(lm, mcp, pip, dip, tip){
+  const bones = dist(lm[mcp],lm[pip]) + dist(lm[pip],lm[dip]) + dist(lm[dip],lm[tip]);
+  return dist(lm[mcp], lm[tip]) / (bones + 1e-6);
+}
+const FINGERS = [[5,6,7,8],[9,10,11,12],[13,14,15,16],[17,18,19,20]]; // index..pinky
 function handOpenness(lm){
-  const scale = dist(lm[0], lm[9]) + 1e-6;          // wrist → middle MCP
-  const tips = [8,12,16,20];
-  let ext = 0;
-  for(const t of tips) ext += dist(lm[t], lm[0]) / scale;
-  ext /= tips.length;                                // ~1.1 fist → ~2.05 open
-  return THREE.MathUtils.clamp((ext - 1.15) / 0.85, 0, 1);
+  let s = 0;
+  for(const [a,b,c,d] of FINGERS) s += fingerStraightness(lm, a, b, c, d);
+  s /= FINGERS.length;
+  return THREE.MathUtils.clamp((s - 0.62) / 0.30, 0, 1);
 }
 
 /* ----- hand orientation → quaternion -----
@@ -499,6 +514,19 @@ function handQuaternion(lm){
   const m = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
   return new THREE.Quaternion().setFromRotationMatrix(m);
 }
+
+/* ----- signal smoothing (anti-flicker) -----
+   MediaPipe landmarks jitter frame-to-frame. A 3-sample median rejects
+   single-frame spikes with zero added lag, then a light exponential blend
+   (α≈0.5 ≙ a couple of frames) takes the remaining edge off. */
+const filt = { open: [], tx: null, ty: null };
+function median3(a){
+  if(a.length < 3) return a[a.length-1];
+  const [x,y,z] = a;
+  return Math.max(Math.min(x,y), Math.min(Math.max(x,y), z));
+}
+function ema(prev, next, a){ return prev === null ? next : prev + (next - prev) * a; }
+function resetFilters(){ filt.open.length = 0; filt.tx = null; filt.ty = null; }
 
 /* quaternion hygiene: q and -q are the same rotation, but slerping toward the
    wrong sign takes the LONG way around — that was the runaway-spin bug. */
@@ -553,14 +581,20 @@ async function startTracking(){
       if(lm){
         state.hasHand = true;
         clearTimeout(lostTimer);
-        lostTimer = setTimeout(()=>{ state.hasHand=false; }, 350);
+        lostTimer = setTimeout(()=>{ state.hasHand=false; resetFilters(); }, 350);
 
-        state.targetOpen = handOpenness(lm);
-        // palm centre (mirrored x) drives position
+        // openness: 3-frame median (spike rejection) + light EMA
+        filt.open.push(handOpenness(lm));
+        if(filt.open.length > 3) filt.open.shift();
+        state.targetOpen = ema(filt.open.length > 1 ? state.targetOpen : null,
+                               median3(filt.open), 0.5);
+        // palm centre (mirrored x) drives position, lightly smoothed
         const cx = (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x)/5;
         const cy = (lm[0].y + lm[5].y + lm[9].y + lm[13].y + lm[17].y)/5;
-        state.tx = (0.5 - cx) * -6.0;          // mirror: hand right → sphere right
-        state.ty = (0.5 - cy) *  4.0 + 0.55;
+        filt.tx = ema(filt.tx, (0.5 - cx) * -6.0, 0.55);   // mirror: hand right → sphere right
+        filt.ty = ema(filt.ty, (0.5 - cy) *  4.0 + 0.55, 0.55);
+        state.tx = filt.tx;
+        state.ty = filt.ty;
         // full hand rotation → sphere orientation (filtered against flips/noise)
         feedHandOrientation(lm);
         state.lastPalmX = cx;
@@ -647,10 +681,15 @@ function animate(){
   sphere.position.x += (state.tx - sphere.position.x) * Math.min(1, dt*6);
   sphere.position.y += (state.ty - sphere.position.y) * Math.min(1, dt*6);
 
-  /* rotation: exactly track hand orientation while it's "held", otherwise self-rotate */
+  /* rotation: a slow baseline spin runs at ALL times; while the hand is "held",
+     the hand's orientation is composed on top of it (spin ∘ hand), so a still
+     hand still drifts and a rotating hand adds its rotation to the drift */
   const beingHeld = state.mode === 'gesture' && state.hasHand;
+  const idleRate = 0.22 * (reduceMotion ? 0.4 : 1);            // rad/s baseline
+  state.spinAngle = (state.spinAngle + idleRate*dt) % (Math.PI*2);
   if(beingHeld){
-    const goal = _goalQ.copy(state.targetQuat);
+    _idleQ.setFromAxisAngle(_yAxis, state.spinAngle);
+    const goal = _goalQ.copy(state.targetQuat).premultiply(_idleQ);
     hemisphere(goal, sphere.quaternion);              // always take the short way
     const ang = quatAngle(goal, sphere.quaternion);
     if(ang > 1e-4){
@@ -660,8 +699,7 @@ function animate(){
     }
   } else {
     quatInit = false;                                  // re-sync cleanly on next hand lock
-    const idleSpeed = 0.22 * dt * (reduceMotion ? 0.4 : 1);
-    sphere.quaternion.premultiply(_idleQ.setFromAxisAngle(_yAxis, idleSpeed));
+    sphere.quaternion.premultiply(_idleQ.setFromAxisAngle(_yAxis, idleRate*dt));
   }
   ringA.rotation.y += dt*0.9;  ringB.rotation.y -= dt*1.3;
   const softR = Math.sqrt(Math.max(state.radius, 0.01)) * 1.9; // dampened curve for secondary elements
