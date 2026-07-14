@@ -499,11 +499,10 @@ const state = {
   openness: 0.55, targetOpen: 0.55,
   tx: 0, ty: 0.55,          // target sphere position
   hasHand: false, mode: 'standby',
-  velRot: 0, lastPalmX: null,
   radius: 1.4, radiusVel: 0,
-  openVel: 0,                           // grip-change speed (gates orientation)
-  spinAngle: 0,                         // ever-accumulating baseline spin
-  targetQuat: new THREE.Quaternion(),   // hand-derived orientation
+  openVel: 0,                           // grip-change speed (gates rotation)
+  rotSpeed: 0,                          // |hand angular velocity| (gates size)
+  handVel: new THREE.Vector3(),         // hand-imparted angular velocity, rad/s
 };
 
 const $ = id => document.getElementById(id);
@@ -599,28 +598,47 @@ function median3(a){
   return Math.max(Math.min(x,y), Math.min(Math.max(x,y), z));
 }
 function ema(prev, next, a){ return prev === null ? next : prev + (next - prev) * a; }
-function resetFilters(){ filt.open.length = 0; filt.tx = null; filt.ty = null; state.openVel = 0; }
+function resetFilters(){
+  filt.open.length = 0; filt.tx = null; filt.ty = null;
+  state.openVel = 0; prevHandQ = null;   // handVel decays in the main loop — no snap
+}
 
-/* quaternion hygiene: q and -q are the same rotation, but slerping toward the
-   wrong sign takes the LONG way around — that was the runaway-spin bug. */
+/* quaternion hygiene: q and -q are the same rotation; pick the sign nearest ref */
 function hemisphere(q, ref){ if(q.dot(ref) < 0){ q.x*=-1; q.y*=-1; q.z*=-1; q.w*=-1; } return q; }
-function quatAngle(a, b){ return 2 * Math.acos(Math.min(1, Math.abs(a.dot(b)))); }
 
-let quatInit = false, rejectCount = 0;
-function feedHandOrientation(lm){
+/* ----- relative hand rotation → angular velocity -----
+   Instead of steering the sphere toward the hand's ABSOLUTE orientation (which
+   fights the natural spin and stutters on every tracking wobble), we measure
+   the DELTA rotation of the hand between tracking frames, turn it into an
+   angular velocity, and ADD it to the sphere's constant baseline spin.
+   A still hand contributes exactly zero. Noise defence, in order:
+   per-frame flip rejection (huge deltas are tracking errors, not motion),
+   a hard speed cap, the grip-velocity gate (clenching isn't rotation),
+   and an EMA on the velocity vector. */
+let prevHandQ = null, lastFeedT = 0;
+const _dq = new THREE.Quaternion(), _dVel = new THREE.Vector3();
+function feedHandRotation(lm){
   const raw = handQuaternion(lm);
-  if(!quatInit){ state.targetQuat.copy(raw); quatInit = true; return; }
-  hemisphere(raw, state.targetQuat);
-  // reject single-frame tracking flips (palm normal inverting from z-noise);
-  // if the "flip" persists it's a real pose — accept after a few frames
-  if(quatAngle(raw, state.targetQuat) > 1.2 && rejectCount < 6){ rejectCount++; return; }
-  rejectCount = 0;
-  // Freeze orientation while the grip is changing fast: clenching/opening
-  // shakes the palm-basis landmarks (self-occlusion spikes the z estimates),
-  // which otherwise reads as a rapid spin. A steady hand rotating deliberately
-  // has openVel ≈ 0 and keeps full-rate tracking.
-  const stab = THREE.MathUtils.clamp(1 - state.openVel * 28, 0.05, 1);
-  state.targetQuat.slerp(raw, 0.45 * stab);   // temporal smoothing of the raw signal
+  const now = performance.now() / 1000;
+  if(!prevHandQ){ prevHandQ = raw.clone(); lastFeedT = now; return; }
+  const fdt = THREE.MathUtils.clamp(now - lastFeedT, 1/120, 1/10);
+  lastFeedT = now;
+  hemisphere(raw, prevHandQ);
+  // delta = raw ∘ prev⁻¹ : the world-frame rotation since the last frame
+  _dq.copy(prevHandQ).invert().premultiply(raw);
+  if(_dq.w < 0){ _dq.x*=-1; _dq.y*=-1; _dq.z*=-1; _dq.w*=-1; }  // shortest arc
+  const ang = 2 * Math.acos(Math.min(1, _dq.w));
+  const sf  = Math.sqrt(Math.max(0, 1 - _dq.w*_dq.w));
+  prevHandQ.copy(raw);
+  if(ang > 0.55) return;                          // single-frame flip: discard
+  if(sf > 1e-5){
+    // grip gate: clenching shakes the palm basis — don't turn that into spin
+    const stab  = THREE.MathUtils.clamp(1 - state.openVel * 28, 0, 1);
+    const speed = Math.min(ang / fdt, 4.0) * stab;               // rad/s, capped
+    _dVel.set(_dq.x/sf, _dq.y/sf, _dq.z/sf).multiplyScalar(speed);
+  } else _dVel.set(0, 0, 0);
+  state.handVel.lerp(_dVel, 0.4);                 // smooth the velocity vector
+  state.rotSpeed = state.handVel.length();
 }
 
 /* ----- debug readout (press D): raw metric for calibration ----- */
@@ -638,7 +656,7 @@ function updateDebug(dt){
   $('debug').textContent =
     `EXT ${dbg.ext.toFixed(3)}  →  LIN ${dbg.lin.toFixed(3)}  →  OPEN ${dbg.open.toFixed(3)}   (auto-cal ${cal.lo.toFixed(3)}–${cal.hi.toFixed(3)})\n` +
     `per-finger [idx mid rng pnk]  ${p}\n` +
-    `smoothed targetOpen ${state.targetOpen.toFixed(3)}   gripVel ${state.openVel.toFixed(4)}   radius ${state.radius.toFixed(2)}`;
+    `smoothed targetOpen ${state.targetOpen.toFixed(3)}   gripVel ${state.openVel.toFixed(4)}   rotVel ${state.rotSpeed.toFixed(3)}   radius ${state.radius.toFixed(2)}`;
   dbgLogTimer -= dt;
   if(dbgLogTimer <= 0){
     dbgLogTimer = 0.5;
@@ -693,19 +711,22 @@ async function startTracking(){
         if(filt.open.length > 3) filt.open.shift();
         const open = mapOpenness(median3(filt.open));
         const pOpen = state.targetOpen;
-        state.targetOpen = ema(filt.open.length > 1 ? state.targetOpen : null, open, 0.5);
+        // rotation gate: fast rotation self-occludes fingers and corrupts the
+        // openness metric — damp size changes while the hand is rotating
+        const rotGate = THREE.MathUtils.clamp(1 - state.rotSpeed * 0.45, 0.15, 1);
+        state.targetOpen = ema(filt.open.length > 1 ? state.targetOpen : null, open, 0.5 * rotGate);
         // grip-change speed (per tracking frame), used to gate orientation
         state.openVel = ema(state.openVel, Math.abs(state.targetOpen - pOpen), 0.35);
-        // palm centre (mirrored x) drives position, lightly smoothed
+        // palm centre drives position: mirror-view mapping (hand moves right →
+        // sphere moves right on screen), at reduced gain so it stays centred
         const cx = (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x)/5;
         const cy = (lm[0].y + lm[5].y + lm[9].y + lm[13].y + lm[17].y)/5;
-        filt.tx = ema(filt.tx, (0.5 - cx) * -6.0, 0.55);   // mirror: hand right → sphere right
-        filt.ty = ema(filt.ty, (0.5 - cy) *  4.0 + 0.55, 0.55);
+        filt.tx = ema(filt.tx, (0.5 - cx) * 2.4, 0.55);
+        filt.ty = ema(filt.ty, (0.5 - cy) * 1.7 + 0.55, 0.55);
         state.tx = filt.tx;
         state.ty = filt.ty;
-        // full hand rotation → sphere orientation (filtered against flips/noise)
-        feedHandOrientation(lm);
-        state.lastPalmX = cx;
+        // hand rotation deltas → angular velocity added to the natural spin
+        feedHandRotation(lm);
         drawHand(lm);
       } else drawHand(null);
     });
@@ -756,9 +777,9 @@ $('btn-mouse').addEventListener('click', startMouseMode);
    ============================================================ */
 const clock = new THREE.Clock();
 let frames = 0, fpsTimer = 0, glitchTimer = 2 + Math.random()*5, prevOpen = 0.55;
-const MAX_ROT_SPEED = 3.2;   // rad/s hard cap on sphere angular velocity
-const _goalQ = new THREE.Quaternion(), _idleQ = new THREE.Quaternion();
-const _yAxis = new THREE.Vector3(0,1,0);
+const MAX_ROT_SPEED = 3.2;   // rad/s hard cap on hand-imparted angular velocity
+const _spinQ = new THREE.Quaternion(), _idleQ = new THREE.Quaternion();
+const _yAxis = new THREE.Vector3(0,1,0), _wAxis = new THREE.Vector3();
 
 function animate(){
   requestAnimationFrame(animate);
@@ -789,26 +810,19 @@ function animate(){
   sphere.position.x += (state.tx - sphere.position.x) * Math.min(1, dt*6);
   sphere.position.y += (state.ty - sphere.position.y) * Math.min(1, dt*6);
 
-  /* rotation: a slow baseline spin runs at ALL times; while the hand is "held",
-     the hand's orientation is composed on top of it (spin ∘ hand), so a still
-     hand still drifts and a rotating hand adds its rotation to the drift */
-  const beingHeld = state.mode === 'gesture' && state.hasHand;
-  const idleRate = 0.22 * (reduceMotion ? 0.4 : 1);            // rad/s baseline
-  state.spinAngle = (state.spinAngle + idleRate*dt) % (Math.PI*2);
-  if(beingHeld){
-    _idleQ.setFromAxisAngle(_yAxis, state.spinAngle);
-    const goal = _goalQ.copy(state.targetQuat).premultiply(_idleQ);
-    hemisphere(goal, sphere.quaternion);              // always take the short way
-    const ang = quatAngle(goal, sphere.quaternion);
-    if(ang > 1e-4){
-      // tight tracking, but never faster than MAX_ROT_SPEED — kills runaway spin
-      const step = Math.min(Math.min(1, dt*14), (MAX_ROT_SPEED*dt)/ang);
-      sphere.quaternion.slerp(goal, step);
-    }
-  } else {
-    quatInit = false;                                  // re-sync cleanly on next hand lock
-    sphere.quaternion.premultiply(_idleQ.setFromAxisAngle(_yAxis, idleRate*dt));
+  /* rotation: the baseline spin runs unconditionally, and the hand contributes
+     VELOCITY on top of it — never an absolute goal to chase. A still hand adds
+     exactly zero (no fighting, no stutter); stopping or losing the hand lets
+     the extra spin ease out over ~0.3s instead of snapping. */
+  const idleRate = 0.22 * (reduceMotion ? 0.4 : 1);              // rad/s baseline
+  sphere.quaternion.premultiply(_idleQ.setFromAxisAngle(_yAxis, idleRate*dt));
+  state.handVel.multiplyScalar(Math.exp(-3.5*dt));               // gentle ease-out
+  const w = Math.min(state.handVel.length(), MAX_ROT_SPEED);
+  if(w > 1e-4){
+    _wAxis.copy(state.handVel).normalize();
+    sphere.quaternion.premultiply(_spinQ.setFromAxisAngle(_wAxis, w*dt));
   }
+  sphere.quaternion.normalize();
   ringA.rotation.y += dt*0.9;  ringB.rotation.y -= dt*1.3;
   const softR = Math.sqrt(Math.max(state.radius, 0.01)) * 1.9; // dampened curve for secondary elements
   const ringScale = softR;
@@ -845,7 +859,7 @@ function animate(){
   $('ap-val').textContent = state.mode==='standby' ? '—' : pct.toString().padStart(3,'0');
   const _euler = new THREE.Euler().setFromQuaternion(sphere.quaternion, 'YXZ');
   $('rot-val').textContent = (_euler.y % (Math.PI*2)).toFixed(2);
-  $('orient-val').textContent = beingHeld ? 'LOCKED' : 'AUTO';
+  $('orient-val').textContent = (state.mode==='gesture' && state.hasHand) ? 'HAND+SPIN' : 'AUTO';
   const tr = $('hud-tr');
   if(state.mode==='gesture'){
     tr.classList.toggle('locked', state.hasHand);
