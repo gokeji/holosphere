@@ -1,0 +1,5 @@
+# Backup copies of version history
+backup/
+
+# Numbered variant files (preserved in backup/; history lives in git commits)
+holosphere ([0-9]*).html
