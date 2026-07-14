@@ -117,6 +117,15 @@
   #toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:60;font-size:11px;
     letter-spacing:.15em;color:#ffb454;opacity:0;transition:opacity .4s;pointer-events:none}
   #toast.show{opacity:.9}
+
+  /* ---------- debug readout (toggle with D) ---------- */
+  #debug{
+    position:fixed;bottom:26px;left:50%;transform:translateX(-50%);z-index:11;
+    font-size:11px;letter-spacing:.08em;line-height:1.8;padding:10px 16px;
+    border:1px solid rgba(75,232,255,.35);background:rgba(2,8,14,.75);
+    color:var(--cyan);display:none;pointer-events:none;white-space:pre;text-align:left;
+  }
+  #debug.on{display:block}
 </style>
 </head>
 <body>
@@ -163,6 +172,7 @@
 </div>
 
 <div id="toast"></div>
+<div id="debug"></div>
 
 <div id="boot">
   <h2>HOLOSPHERE</h2>
@@ -484,20 +494,44 @@ const toast = (msg)=>{ const t=$('toast'); t.textContent=msg; t.classList.add('s
 
 /* ----- hand math ----- */
 const dist = (a,b)=>Math.hypot(a.x-b.x, a.y-b.y, (a.z||0)-(b.z||0));
-/* Orientation-invariant openness: per-finger "straightness" is the ratio of the
-   straight-line MCP→tip distance to the summed bone lengths of that finger.
-   Being a ratio of distances measured in the same frame, it is unaffected by
-   hand rotation, scale, or distance to the camera — open hand ≈ 1.0, fist ≈ 0.45. */
-function fingerStraightness(lm, mcp, pip, dip, tip){
-  const bones = dist(lm[mcp],lm[pip]) + dist(lm[pip],lm[dip]) + dist(lm[dip],lm[tip]);
-  return dist(lm[mcp], lm[tip]) / (bones + 1e-6);
-}
+/* Openness metric v3 — palm-center proximity.
+   The previous "straightness" (chord/bones) metric was NON-monotonic: the
+   knuckle→tip chord is shortest at a HALF fist, then grows again as the tip
+   tucks past toward the palm — so a full fist read as more open than a half
+   fist. Instead we measure how far the fingertips (and PIP knuckles, which
+   stabilise the signal) are from the palm centre, normalised by that finger's
+   maximum possible reach (palmcentre→MCP + bone lengths). This ratio is
+   scale/rotation invariant AND shrinks monotonically as the fist closes:
+   tips travel continuously toward the palm and stay there.
+     fully open  ≈ 0.90+   half fist ≈ 0.65   tight fist ≈ 0.35
+   Calibration window below maps that onto 0..1. Press D for live readouts. */
+const EXT_LO = 0.38, EXT_HI = 0.88;      // raw ext values mapped to 0 / 1
 const FINGERS = [[5,6,7,8],[9,10,11,12],[13,14,15,16],[17,18,19,20]]; // index..pinky
+const PALM_IDS = [0,5,9,13,17];
+const dbg = { ext: 0, per: [0,0,0,0], open: 0 };
+function palmCenter(lm){
+  let x=0,y=0,z=0;
+  for(const i of PALM_IDS){ x+=lm[i].x; y+=lm[i].y; z+=(lm[i].z||0); }
+  const n = PALM_IDS.length;
+  return {x:x/n, y:y/n, z:z/n};
+}
 function handOpenness(lm){
-  let s = 0;
-  for(const [a,b,c,d] of FINGERS) s += fingerStraightness(lm, a, b, c, d);
-  s /= FINGERS.length;
-  return THREE.MathUtils.clamp((s - 0.62) / 0.30, 0, 1);
+  const pc = palmCenter(lm);
+  let sum = 0;
+  for(let f=0; f<FINGERS.length; f++){
+    const [mcp,pip,dip,tip] = FINGERS[f];
+    const b1 = dist(lm[mcp],lm[pip]);
+    const bones = b1 + dist(lm[pip],lm[dip]) + dist(lm[dip],lm[tip]);
+    const base  = dist(pc, lm[mcp]);
+    const rTip  = dist(pc, lm[tip]) / (base + bones + 1e-6);
+    const rPip  = dist(pc, lm[pip]) / (base + b1 + 1e-6);
+    const e = 0.7*rTip + 0.3*rPip;
+    dbg.per[f] = e;
+    sum += e;
+  }
+  dbg.ext = sum / FINGERS.length;
+  dbg.open = THREE.MathUtils.clamp((dbg.ext - EXT_LO) / (EXT_HI - EXT_LO), 0, 1);
+  return dbg.open;
 }
 
 /* ----- hand orientation → quaternion -----
@@ -543,6 +577,32 @@ function feedHandOrientation(lm){
   if(quatAngle(raw, state.targetQuat) > 1.2 && rejectCount < 6){ rejectCount++; return; }
   rejectCount = 0;
   state.targetQuat.slerp(raw, 0.45);   // temporal smoothing of the raw signal
+}
+
+/* ----- debug readout (press D): raw metric for calibration ----- */
+let debugOn = false, dbgLogTimer = 0;
+addEventListener('keydown', e=>{
+  if(e.key === 'd' || e.key === 'D'){
+    debugOn = !debugOn;
+    $('debug').classList.toggle('on', debugOn);
+    toast(debugOn ? 'DEBUG ON — EXT IS THE RAW VALUE TO CALIBRATE' : 'DEBUG OFF');
+  }
+});
+function updateDebug(dt){
+  if(!debugOn) return;
+  const p = dbg.per.map(v=>v.toFixed(3)).join('  ');
+  $('debug').textContent =
+    `EXT ${dbg.ext.toFixed(3)}  →  OPEN ${dbg.open.toFixed(3)}   (cal window ${EXT_LO}–${EXT_HI})\n` +
+    `per-finger [idx mid rng pnk]  ${p}\n` +
+    `smoothed targetOpen ${state.targetOpen.toFixed(3)}   radius ${state.radius.toFixed(2)}`;
+  dbgLogTimer -= dt;
+  if(dbgLogTimer <= 0){
+    dbgLogTimer = 0.5;
+    console.log('[holosphere]', JSON.stringify({
+      ext:+dbg.ext.toFixed(4), open:+dbg.open.toFixed(4),
+      fingers:dbg.per.map(v=>+v.toFixed(4))
+    }));
+  }
 }
 
 /* ----- landmark preview drawing ----- */
@@ -747,6 +807,7 @@ function animate(){
   }
   frames++; fpsTimer += dt;
   if(fpsTimer >= 0.75){ $('fps-txt').textContent = Math.round(frames/fpsTimer)+' FPS'; frames=0; fpsTimer=0; }
+  updateDebug(dt);
 
   renderer.render(scene, camera);
 }
