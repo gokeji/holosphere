@@ -261,14 +261,10 @@ const sphereMat = new THREE.ShaderMaterial({
     attribute float aSeed;
     attribute float aShell;
     uniform float uTime, uRadius, uChaos, uPulse, uPixel;
-    varying float vSeed, vShade, vShell, vKeep;
+    varying float vSeed, vShade, vShell, vCond;
 
     void main(){
       vSeed = aSeed; vShell = aShell;
-      // thinning mask for the condensed form: core particles (seed<0.2) always
-      // survive, but ~55% of ring particles fade away so the torus stays
-      // translucent and the glowing core inside remains visible
-      vKeep = (aSeed < 0.2 || aSeed > 0.64) ? 1.0 : 0.0;
       vec3 d = aDir;
 
       // gentle coherent shimmer (no more violent per-particle swirl)
@@ -282,20 +278,41 @@ const sphereMat = new THREE.ShaderMaterial({
       float r = uRadius * aShell * (1.0 + wob + wave) * (1.0 + uPulse*0.12);
       vec3 spherePos = d * r;
 
-      // condensed form: a luminous gyroscopic torus orbiting a tight core
+      // condensed form: an orbital "gyroscope" — a breathing core wrapped in
+      // three tilted, counter-rotating particle rings plus a sparse halo of
+      // drifting motes. Rings have real tube thickness and per-particle phase
+      // so the dots keep their texture instead of stacking into a solid blob.
       float k = smoothstep(0.45, 0.95, uChaos);
-      float u = atan(d.z, d.x) + uTime*0.5;                       // orbit angle
-      float v = asin(clamp(d.y,-1.0,1.0))*2.0 + aSeed*6.2831
-              + uTime*(0.7 + aSeed*0.5);                          // tube angle, flowing
-      float R0 = 0.78, r0 = 0.2;
-      vec3 torusPos = vec3((R0 + r0*cos(v))*cos(u),
-                           r0*sin(v)*1.2,
-                           (R0 + r0*cos(v))*sin(u));
-      // ~1 in 5 particles feed the bright inner core instead of the ring
-      float isCore = step(aSeed, 0.2);
-      vec3 corePos = d * (0.14 + aSeed*0.9);                      // core with breathing shell
-      corePos *= 1.0 + sin(uTime*2.2 + aSeed*6.2831)*0.06;
-      vec3 condensed = mix(torusPos, corePos, isCore);
+      float h1 = fract(aSeed*17.131);   // independent per-particle randoms
+      float h2 = fract(aSeed*39.719);
+      float h3 = fract(aSeed*83.377);
+      vec3 condensed;
+      if(aSeed < 0.16){
+        // pulsing kernel, hot and dense at the centre
+        condensed = d * (0.10 + h1*h1*0.30) * (1.0 + sin(uTime*2.4 + h2*6.2831)*0.08);
+        vCond = 1.0;
+      } else if(aSeed < 0.86){
+        // three rings, ~2800 particles each, distinct radius/tilt/speed/direction
+        float band = floor((aSeed - 0.16) / 0.2334);            // 0, 1, 2
+        float dir  = mix(1.0, -1.0, mod(band, 2.0));
+        float u    = h1*6.2831 + uTime*(0.5 + band*0.22)*dir;   // orbit angle
+        float v    = h2*6.2831 + uTime*1.6;                      // tube swirl
+        float tw   = 0.055 + h3*0.085;                           // tube thickness
+        float R    = 0.82 + band*0.22;
+        vec3 p = vec3((R + tw*cos(v))*cos(u), tw*sin(v)*1.5, (R + tw*cos(v))*sin(u));
+        float tilt = 0.45 + band*1.05;
+        float ct = cos(tilt), st = sin(tilt);
+        p = (band < 1.5)
+          ? vec3(p.x, ct*p.y - st*p.z, st*p.y + ct*p.z)          // rings 0,1: tilt about X
+          : vec3(ct*p.x - st*p.y, st*p.x + ct*p.y, p.z);         // ring 2: tilt about Z
+        condensed = p;
+        vCond = 0.85;
+      } else {
+        // faint motes orbiting the whole assembly — depth + see-through volume
+        condensed = d * (1.3 + h1*0.55);
+        condensed.y += sin(uTime*0.8 + h2*6.2831)*0.09;
+        vCond = 0.3;
+      }
 
       vec3 pos = mix(spherePos, condensed, k);
       // slight vertical drift of loose motes
@@ -315,7 +332,7 @@ const sphereMat = new THREE.ShaderMaterial({
   fragmentShader:`
     uniform float uTime, uChaos;
     uniform vec3 uColA, uColB;
-    varying float vSeed, vShade, vShell, vKeep;
+    varying float vSeed, vShade, vShell, vCond;
 
     void main(){
       vec2 p = gl_PointCoord - 0.5;
@@ -328,10 +345,10 @@ const sphereMat = new THREE.ShaderMaterial({
       alpha *= 0.65 + 0.35*sin(uTime*(6.0+vSeed*14.0) + vSeed*80.0);
       // prevent additive washout when condensed
       float k = smoothstep(0.45, 0.95, uChaos);
-      alpha *= 1.0 - 0.25*k;
-      // dissolve the masked ring particles as the form condenses,
-      // keeping the collapsed torus see-through
-      alpha *= mix(1.0, vKeep, k);
+      alpha *= 1.0 - 0.15*k;
+      // per-group weighting of the condensed form: core bright, rings mid,
+      // halo motes faint — keeps the gyroscope readable and see-through
+      alpha *= mix(1.0, vCond, k);
 
       vec3 col = mix(uColA, uColB, vSeed*0.55 + vShade*0.35);
       col += vec3(0.9,0.95,1.0) * pow(vShade, 3.0) * 0.6;   // rim sparkle
@@ -504,8 +521,10 @@ const dist = (a,b)=>Math.hypot(a.x-b.x, a.y-b.y, (a.z||0)-(b.z||0));
    scale/rotation invariant AND shrinks monotonically as the fist closes:
    tips travel continuously toward the palm and stay there.
      fully open  ≈ 0.90+   half fist ≈ 0.65   tight fist ≈ 0.35
-   Calibration window below maps that onto 0..1. Press D for live readouts. */
-const EXT_LO = 0.38, EXT_HI = 0.88;      // raw ext values mapped to 0 / 1
+   The window mapping ext→0..1 AUTO-CALIBRATES: exceed either end and that end
+   stretches to your actual range of motion. Press D for live readouts. */
+const CAL_DEF = { lo: 0.40, hi: 0.86 };
+const cal = { lo: CAL_DEF.lo, hi: CAL_DEF.hi };
 const FINGERS = [[5,6,7,8],[9,10,11,12],[13,14,15,16],[17,18,19,20]]; // index..pinky
 const PALM_IDS = [0,5,9,13,17];
 const dbg = { ext: 0, per: [0,0,0,0], open: 0 };
@@ -515,7 +534,7 @@ function palmCenter(lm){
   const n = PALM_IDS.length;
   return {x:x/n, y:y/n, z:z/n};
 }
-function handOpenness(lm){
+function handExt(lm){
   const pc = palmCenter(lm);
   let sum = 0;
   for(let f=0; f<FINGERS.length; f++){
@@ -530,7 +549,19 @@ function handOpenness(lm){
     sum += e;
   }
   dbg.ext = sum / FINGERS.length;
-  dbg.open = THREE.MathUtils.clamp((dbg.ext - EXT_LO) / (EXT_HI - EXT_LO), 0, 1);
+  return dbg.ext;
+}
+/* Auto-calibration. Fed MEDIAN-FILTERED ext (so a single glitch frame can't
+   blow the window open). Exceeding an end pulls that end to the new extreme
+   within a few frames — it becomes the new 0% / 100%. A very slow relaxation
+   toward the defaults (~3%/s) heals the window if a brief tracking error ever
+   over-stretched it; genuine poses re-expand it faster than it decays. */
+function mapOpenness(ext){
+  if(ext > cal.hi) cal.hi += (ext - cal.hi) * 0.5;
+  if(ext < cal.lo) cal.lo += (ext - cal.lo) * 0.5;
+  cal.hi += (CAL_DEF.hi - cal.hi) * 0.0012;
+  cal.lo += (CAL_DEF.lo - cal.lo) * 0.0012;
+  dbg.open = THREE.MathUtils.clamp((ext - cal.lo) / (cal.hi - cal.lo), 0, 1);
   return dbg.open;
 }
 
@@ -592,7 +623,7 @@ function updateDebug(dt){
   if(!debugOn) return;
   const p = dbg.per.map(v=>v.toFixed(3)).join('  ');
   $('debug').textContent =
-    `EXT ${dbg.ext.toFixed(3)}  →  OPEN ${dbg.open.toFixed(3)}   (cal window ${EXT_LO}–${EXT_HI})\n` +
+    `EXT ${dbg.ext.toFixed(3)}  →  OPEN ${dbg.open.toFixed(3)}   (auto-cal window ${cal.lo.toFixed(3)}–${cal.hi.toFixed(3)})\n` +
     `per-finger [idx mid rng pnk]  ${p}\n` +
     `smoothed targetOpen ${state.targetOpen.toFixed(3)}   radius ${state.radius.toFixed(2)}`;
   dbgLogTimer -= dt;
@@ -600,6 +631,7 @@ function updateDebug(dt){
     dbgLogTimer = 0.5;
     console.log('[holosphere]', JSON.stringify({
       ext:+dbg.ext.toFixed(4), open:+dbg.open.toFixed(4),
+      cal:[+cal.lo.toFixed(4), +cal.hi.toFixed(4)],
       fingers:dbg.per.map(v=>+v.toFixed(4))
     }));
   }
@@ -643,11 +675,11 @@ async function startTracking(){
         clearTimeout(lostTimer);
         lostTimer = setTimeout(()=>{ state.hasHand=false; resetFilters(); }, 350);
 
-        // openness: 3-frame median (spike rejection) + light EMA
-        filt.open.push(handOpenness(lm));
+        // openness: raw ext → 3-frame median (spike rejection) → auto-cal map → light EMA
+        filt.open.push(handExt(lm));
         if(filt.open.length > 3) filt.open.shift();
-        state.targetOpen = ema(filt.open.length > 1 ? state.targetOpen : null,
-                               median3(filt.open), 0.5);
+        const open = mapOpenness(median3(filt.open));
+        state.targetOpen = ema(filt.open.length > 1 ? state.targetOpen : null, open, 0.5);
         // palm centre (mirrored x) drives position, lightly smoothed
         const cx = (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x)/5;
         const cy = (lm[0].y + lm[5].y + lm[9].y + lm[13].y + lm[17].y)/5;
