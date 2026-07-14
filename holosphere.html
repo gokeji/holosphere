@@ -1,262 +1,602 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HOLOSPHERE // Gesture Projection</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --cyan:#4be8ff; --cyan-dim:rgba(75,232,255,.45); --violet:#8a7bff;
-    --bg0:#02060c; --bg1:#04101d;
-  }
-  *{margin:0;padding:0;box-sizing:border-box}
-  html,body{height:100%;overflow:hidden;background:var(--bg0)}
-  body{
-    font-family:'Share Tech Mono',ui-monospace,monospace;
-    color:var(--cyan);
-    background:radial-gradient(120% 90% at 50% 70%, var(--bg1) 0%, var(--bg0) 60%, #000 100%);
-  }
-  #stage{position:fixed;inset:0}
-  canvas{display:block}
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HOLOSPHERE // Gesture Projection</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --cyan: #4be8ff;
+      --cyan-dim: rgba(75, 232, 255, .45);
+      --violet: #8a7bff;
+      --bg0: #02060c;
+      --bg1: #04101d;
+    }
 
-  /* ---------- hologram atmosphere overlays ---------- */
-  .scanlines{
-    position:fixed;inset:0;pointer-events:none;z-index:5;mix-blend-mode:overlay;opacity:.5;
-    background:repeating-linear-gradient(to bottom, rgba(120,220,255,.06) 0 1px, transparent 1px 3px);
-  }
-  .vignette{
-    position:fixed;inset:0;pointer-events:none;z-index:6;
-    background:radial-gradient(ellipse at 50% 55%, transparent 45%, rgba(0,0,0,.55) 100%);
-  }
-  .flicker{
-    position:fixed;inset:0;pointer-events:none;z-index:7;background:rgba(140,230,255,.03);
-    animation:flick 4.2s steps(1) infinite;
-  }
-  @keyframes flick{
-    0%,93%,100%{opacity:.25} 94%{opacity:.55} 95%{opacity:.1} 96.5%{opacity:.6} 97%{opacity:.2}
-  }
-  #stage.glitch{animation:glitch .18s steps(2) 1}
-  @keyframes glitch{
-    0%{transform:translateX(0)} 25%{transform:translateX(3px) skewX(.4deg)}
-    50%{transform:translateX(-3px)} 75%{transform:translateX(2px) skewX(-.3deg)} 100%{transform:none}
-  }
-  @media (prefers-reduced-motion: reduce){
-    .flicker{animation:none;opacity:.15}
-    #stage.glitch{animation:none}
-  }
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box
+    }
 
-  /* ---------- HUD ---------- */
-  .hud{position:fixed;z-index:10;pointer-events:none;text-transform:uppercase;letter-spacing:.14em}
-  .hud .lbl{font-size:10px;opacity:.55}
-  .hud .val{font-size:13px;text-shadow:0 0 8px var(--cyan-dim)}
+    html,
+    body {
+      height: 100%;
+      overflow: hidden;
+      background: var(--bg0)
+    }
 
-  #hud-tl{top:22px;left:26px}
-  #hud-tl h1{font-size:15px;font-weight:400;letter-spacing:.3em;text-shadow:0 0 12px var(--cyan-dim)}
-  #hud-tl .sub{font-size:10px;opacity:.5;margin-top:4px}
+    body {
+      font-family: 'Share Tech Mono', ui-monospace, monospace;
+      color: var(--cyan);
+      background: radial-gradient(120% 90% at 50% 70%, var(--bg1) 0%, var(--bg0) 60%, #000 100%);
+    }
 
-  #hud-tr{top:22px;right:26px;text-align:right}
-  #track-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#ff5470;
-    box-shadow:0 0 8px #ff5470;margin-right:7px;vertical-align:1px;transition:.3s}
-  #hud-tr.locked #track-dot{background:#4bffb4;box-shadow:0 0 10px #4bffb4}
+    #stage {
+      position: fixed;
+      inset: 0
+    }
 
-  #hud-bl{bottom:26px;left:26px;width:230px}
-  #ap-bar{margin-top:6px;height:8px;border:1px solid rgba(75,232,255,.35);position:relative;overflow:hidden}
-  #ap-fill{position:absolute;inset:1px auto 1px 1px;width:40%;
-    background:linear-gradient(90deg, rgba(75,232,255,.25), var(--cyan));
-    box-shadow:0 0 12px var(--cyan-dim);transition:width .08s linear}
-  #ap-ticks{display:flex;justify-content:space-between;font-size:9px;opacity:.4;margin-top:3px}
+    canvas {
+      display: block
+    }
 
-  #hud-br{bottom:26px;right:26px;text-align:right;font-size:10px;opacity:.65;line-height:1.7}
+    /* ---------- hologram atmosphere overlays ---------- */
+    .scanlines {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 5;
+      mix-blend-mode: overlay;
+      opacity: .5;
+      background: repeating-linear-gradient(to bottom, rgba(120, 220, 255, .06) 0 1px, transparent 1px 3px);
+    }
 
-  /* corner brackets */
-  .corner{position:fixed;width:26px;height:26px;z-index:9;pointer-events:none;opacity:.6}
-  .corner::before,.corner::after{content:"";position:absolute;background:var(--cyan);box-shadow:0 0 6px var(--cyan-dim)}
-  .corner::before{width:100%;height:1px}
-  .corner::after{width:1px;height:100%}
-  .c-tl{top:12px;left:12px}
-  .c-tr{top:12px;right:12px;transform:scaleX(-1)}
-  .c-bl{bottom:12px;left:12px;transform:scaleY(-1)}
-  .c-br{bottom:12px;right:12px;transform:scale(-1)}
+    .vignette {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 6;
+      background: radial-gradient(ellipse at 50% 55%, transparent 45%, rgba(0, 0, 0, .55) 100%);
+    }
 
-  /* ---------- camera preview ---------- */
-  #cam-wrap{
-    position:fixed;top:70px;right:26px;z-index:10;width:176px;height:132px;
-    border:1px solid rgba(75,232,255,.4);box-shadow:0 0 18px rgba(75,232,255,.12), inset 0 0 30px rgba(0,0,0,.5);
-    background:#000;display:none;
-  }
-  #cam-wrap.on{display:block}
-  #cam-video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;transform:scaleX(-1);opacity:.55;filter:saturate(.3) contrast(1.1)}
-  #cam-overlay{position:absolute;inset:0;width:100%;height:100%}
-  #cam-wrap .tag{position:absolute;bottom:-16px;left:0;font-size:9px;letter-spacing:.2em;opacity:.5}
+    .flicker {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 7;
+      background: rgba(140, 230, 255, .03);
+      animation: flick 4.2s steps(1) infinite;
+    }
 
-  /* ---------- boot overlay ---------- */
-  #boot{
-    position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;gap:26px;
-    align-items:center;justify-content:center;background:rgba(1,4,9,.86);backdrop-filter:blur(3px);
-    text-align:center;padding:20px;
-  }
-  #boot h2{font-weight:400;font-size:20px;letter-spacing:.35em;text-shadow:0 0 16px var(--cyan-dim)}
-  #boot p{max-width:460px;font-size:12px;line-height:1.9;opacity:.6;letter-spacing:.08em}
-  .btn{
-    pointer-events:auto;cursor:pointer;font-family:inherit;letter-spacing:.25em;font-size:12px;
-    color:var(--cyan);background:rgba(75,232,255,.06);border:1px solid rgba(75,232,255,.5);
-    padding:13px 34px;text-transform:uppercase;transition:.2s;
-  }
-  .btn:hover{background:rgba(75,232,255,.16);box-shadow:0 0 22px rgba(75,232,255,.25);text-shadow:0 0 8px var(--cyan)}
-  .btn.ghost{opacity:.55;border-color:rgba(75,232,255,.25)}
-  #boot .keys{font-size:10px;opacity:.35;letter-spacing:.15em}
+    @keyframes flick {
 
-  /* manual slider (fallback) */
-  #manual{position:fixed;bottom:64px;left:26px;z-index:10;display:none;align-items:center;gap:10px;pointer-events:auto}
-  #manual.on{display:flex}
-  #manual input{width:180px;accent-color:var(--cyan)}
-  #manual span{font-size:10px;opacity:.55;letter-spacing:.15em}
+      0%,
+      93%,
+      100% {
+        opacity: .25
+      }
 
-  #toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:60;font-size:11px;
-    letter-spacing:.15em;color:#ffb454;opacity:0;transition:opacity .4s;pointer-events:none}
-  #toast.show{opacity:.9}
+      94% {
+        opacity: .55
+      }
 
-  /* ---------- debug readout (toggle with D) ---------- */
-  #debug{
-    position:fixed;bottom:26px;left:50%;transform:translateX(-50%);z-index:11;
-    font-size:11px;letter-spacing:.08em;line-height:1.8;padding:10px 16px;
-    border:1px solid rgba(75,232,255,.35);background:rgba(2,8,14,.75);
-    color:var(--cyan);display:none;pointer-events:none;white-space:pre;text-align:left;
-  }
-  #debug.on{display:block}
-</style>
+      95% {
+        opacity: .1
+      }
+
+      96.5% {
+        opacity: .6
+      }
+
+      97% {
+        opacity: .2
+      }
+    }
+
+    #stage.glitch {
+      animation: glitch .18s steps(2) 1
+    }
+
+    @keyframes glitch {
+      0% {
+        transform: translateX(0)
+      }
+
+      25% {
+        transform: translateX(3px) skewX(.4deg)
+      }
+
+      50% {
+        transform: translateX(-3px)
+      }
+
+      75% {
+        transform: translateX(2px) skewX(-.3deg)
+      }
+
+      100% {
+        transform: none
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .flicker {
+        animation: none;
+        opacity: .15
+      }
+
+      #stage.glitch {
+        animation: none
+      }
+    }
+
+    /* ---------- HUD ---------- */
+    .hud {
+      position: fixed;
+      z-index: 10;
+      pointer-events: none;
+      text-transform: uppercase;
+      letter-spacing: .14em
+    }
+
+    .hud .lbl {
+      font-size: 10px;
+      opacity: .55
+    }
+
+    .hud .val {
+      font-size: 13px;
+      text-shadow: 0 0 8px var(--cyan-dim)
+    }
+
+    #hud-tl {
+      top: 22px;
+      left: 26px
+    }
+
+    #hud-tl h1 {
+      font-size: 15px;
+      font-weight: 400;
+      letter-spacing: .3em;
+      text-shadow: 0 0 12px var(--cyan-dim)
+    }
+
+    #hud-tl .sub {
+      font-size: 10px;
+      opacity: .5;
+      margin-top: 4px
+    }
+
+    #hud-tr {
+      top: 22px;
+      right: 26px;
+      text-align: right
+    }
+
+    #track-dot {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #ff5470;
+      box-shadow: 0 0 8px #ff5470;
+      margin-right: 7px;
+      vertical-align: 1px;
+      transition: .3s
+    }
+
+    #hud-tr.locked #track-dot {
+      background: #4bffb4;
+      box-shadow: 0 0 10px #4bffb4
+    }
+
+    #hud-bl {
+      bottom: 26px;
+      left: 26px;
+      width: 230px
+    }
+
+    #ap-bar {
+      margin-top: 6px;
+      height: 8px;
+      border: 1px solid rgba(75, 232, 255, .35);
+      position: relative;
+      overflow: hidden
+    }
+
+    #ap-fill {
+      position: absolute;
+      inset: 1px auto 1px 1px;
+      width: 40%;
+      background: linear-gradient(90deg, rgba(75, 232, 255, .25), var(--cyan));
+      box-shadow: 0 0 12px var(--cyan-dim);
+      transition: width .08s linear
+    }
+
+    #ap-ticks {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      opacity: .4;
+      margin-top: 3px
+    }
+
+    #hud-br {
+      bottom: 26px;
+      right: 26px;
+      text-align: right;
+      font-size: 10px;
+      opacity: .65;
+      line-height: 1.7
+    }
+
+    /* corner brackets */
+    .corner {
+      position: fixed;
+      width: 26px;
+      height: 26px;
+      z-index: 9;
+      pointer-events: none;
+      opacity: .6
+    }
+
+    .corner::before,
+    .corner::after {
+      content: "";
+      position: absolute;
+      background: var(--cyan);
+      box-shadow: 0 0 6px var(--cyan-dim)
+    }
+
+    .corner::before {
+      width: 100%;
+      height: 1px
+    }
+
+    .corner::after {
+      width: 1px;
+      height: 100%
+    }
+
+    .c-tl {
+      top: 12px;
+      left: 12px
+    }
+
+    .c-tr {
+      top: 12px;
+      right: 12px;
+      transform: scaleX(-1)
+    }
+
+    .c-bl {
+      bottom: 12px;
+      left: 12px;
+      transform: scaleY(-1)
+    }
+
+    .c-br {
+      bottom: 12px;
+      right: 12px;
+      transform: scale(-1)
+    }
+
+    /* ---------- camera preview ---------- */
+    #cam-wrap {
+      position: fixed;
+      top: 70px;
+      right: 26px;
+      z-index: 10;
+      width: 176px;
+      height: 132px;
+      border: 1px solid rgba(75, 232, 255, .4);
+      box-shadow: 0 0 18px rgba(75, 232, 255, .12), inset 0 0 30px rgba(0, 0, 0, .5);
+      background: #000;
+      display: none;
+    }
+
+    #cam-wrap.on {
+      display: block
+    }
+
+    #cam-video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      transform: scaleX(-1);
+      opacity: .55;
+      filter: saturate(.3) contrast(1.1)
+    }
+
+    #cam-overlay {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%
+    }
+
+    #cam-wrap .tag {
+      position: absolute;
+      bottom: -16px;
+      left: 0;
+      font-size: 9px;
+      letter-spacing: .2em;
+      opacity: .5
+    }
+
+    /* ---------- boot overlay ---------- */
+    #boot {
+      position: fixed;
+      inset: 0;
+      z-index: 50;
+      display: flex;
+      flex-direction: column;
+      gap: 26px;
+      align-items: center;
+      justify-content: center;
+      background: rgba(1, 4, 9, .86);
+      backdrop-filter: blur(3px);
+      text-align: center;
+      padding: 20px;
+    }
+
+    #boot h2 {
+      font-weight: 400;
+      font-size: 20px;
+      letter-spacing: .35em;
+      text-shadow: 0 0 16px var(--cyan-dim)
+    }
+
+    #boot p {
+      max-width: 460px;
+      font-size: 12px;
+      line-height: 1.9;
+      opacity: .6;
+      letter-spacing: .08em
+    }
+
+    .btn {
+      pointer-events: auto;
+      cursor: pointer;
+      font-family: inherit;
+      letter-spacing: .25em;
+      font-size: 12px;
+      color: var(--cyan);
+      background: rgba(75, 232, 255, .06);
+      border: 1px solid rgba(75, 232, 255, .5);
+      padding: 13px 34px;
+      text-transform: uppercase;
+      transition: .2s;
+    }
+
+    .btn:hover {
+      background: rgba(75, 232, 255, .16);
+      box-shadow: 0 0 22px rgba(75, 232, 255, .25);
+      text-shadow: 0 0 8px var(--cyan)
+    }
+
+    .btn.ghost {
+      opacity: .55;
+      border-color: rgba(75, 232, 255, .25)
+    }
+
+    #boot .keys {
+      font-size: 10px;
+      opacity: .35;
+      letter-spacing: .15em
+    }
+
+    /* manual slider (fallback) */
+    #manual {
+      position: fixed;
+      bottom: 64px;
+      left: 26px;
+      z-index: 10;
+      display: none;
+      align-items: center;
+      gap: 10px;
+      pointer-events: auto
+    }
+
+    #manual.on {
+      display: flex
+    }
+
+    #manual input {
+      width: 180px;
+      accent-color: var(--cyan)
+    }
+
+    #manual span {
+      font-size: 10px;
+      opacity: .55;
+      letter-spacing: .15em
+    }
+
+    #toast {
+      position: fixed;
+      top: 70px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 60;
+      font-size: 11px;
+      letter-spacing: .15em;
+      color: #ffb454;
+      opacity: 0;
+      transition: opacity .4s;
+      pointer-events: none
+    }
+
+    #toast.show {
+      opacity: .9
+    }
+
+    /* ---------- debug readout (toggle with D) ---------- */
+    #debug {
+      position: fixed;
+      bottom: 26px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 11;
+      font-size: 11px;
+      letter-spacing: .08em;
+      line-height: 1.8;
+      padding: 10px 16px;
+      border: 1px solid rgba(75, 232, 255, .35);
+      background: rgba(2, 8, 14, .75);
+      color: var(--cyan);
+      display: none;
+      pointer-events: none;
+      white-space: pre;
+      text-align: left;
+    }
+
+    #debug.on {
+      display: block
+    }
+  </style>
 </head>
+
 <body>
 
-<div id="stage"></div>
-<div class="scanlines"></div>
-<div class="vignette"></div>
-<div class="flicker"></div>
+  <div id="stage"></div>
+  <div class="scanlines"></div>
+  <div class="vignette"></div>
+  <div class="flicker"></div>
 
-<div class="corner c-tl"></div><div class="corner c-tr"></div>
-<div class="corner c-bl"></div><div class="corner c-br"></div>
+  <div class="corner c-tl"></div>
+  <div class="corner c-tr"></div>
+  <div class="corner c-bl"></div>
+  <div class="corner c-br"></div>
 
-<div class="hud" id="hud-tl">
-  <h1>HOLOSPHERE</h1>
-  <div class="sub">VOLUMETRIC PROJECTION // UNIT 07</div>
-</div>
+  <div class="hud" id="hud-tl">
+    <h1>HOLOSPHERE</h1>
+    <div class="sub">VOLUMETRIC PROJECTION // UNIT 07</div>
+  </div>
 
-<div class="hud" id="hud-tr">
-  <div class="val"><span id="track-dot"></span><span id="track-txt">NO SIGNAL</span></div>
-  <div class="lbl" id="fps-txt">— FPS</div>
-</div>
+  <div class="hud" id="hud-tr">
+    <div class="val"><span id="track-dot"></span><span id="track-txt">NO SIGNAL</span></div>
+    <div class="lbl" id="fps-txt">— FPS</div>
+  </div>
 
-<div class="hud" id="hud-bl">
-  <div class="lbl">APERTURE <span id="ap-val" class="val" style="float:right">—</span></div>
-  <div id="ap-bar"><div id="ap-fill"></div></div>
-  <div id="ap-ticks"><span>FIST</span><span>50</span><span>OPEN</span></div>
-</div>
+  <div class="hud" id="hud-bl">
+    <div class="lbl">APERTURE <span id="ap-val" class="val" style="float:right">—</span></div>
+    <div id="ap-bar">
+      <div id="ap-fill"></div>
+    </div>
+    <div id="ap-ticks"><span>FIST</span><span>50</span><span>OPEN</span></div>
+  </div>
 
-<div class="hud" id="hud-br">
-  <div>ROT <span id="rot-val">0.00</span> RAD <span id="orient-val" style="opacity:.6">AUTO</span></div>
-  <div>PARTICLES 12,000</div>
-  <div>MODE <span id="mode-val">STANDBY</span></div>
-</div>
+  <div class="hud" id="hud-br">
+    <div>ROT <span id="rot-val">0.00</span> RAD <span id="orient-val" style="opacity:.6">AUTO</span></div>
+    <div>PARTICLES 12,000</div>
+    <div>MODE <span id="mode-val">STANDBY</span></div>
+  </div>
 
-<div id="cam-wrap">
-  <video id="cam-video" playsinline muted></video>
-  <canvas id="cam-overlay"></canvas>
-  <div class="tag">OPTICAL FEED 01</div>
-</div>
+  <div id="cam-wrap">
+    <video id="cam-video" playsinline muted></video>
+    <canvas id="cam-overlay"></canvas>
+    <div class="tag">OPTICAL FEED 01</div>
+  </div>
 
-<div id="manual">
-  <span>MANUAL APERTURE</span>
-  <input type="range" id="manual-slider" min="0" max="100" value="55">
-</div>
+  <div id="manual">
+    <span>MANUAL APERTURE</span>
+    <input type="range" id="manual-slider" min="0" max="100" value="55">
+  </div>
 
-<div id="toast"></div>
-<div id="debug"></div>
+  <div id="toast"></div>
+  <div id="debug"></div>
 
-<div id="boot">
-  <h2>HOLOSPHERE</h2>
-  <p>
-    Gesture-controlled volumetric projection.<br><br>
-    Open your hand to expand the sphere &mdash; close your fist to collapse it into the core.
-    Move your hand to steer the projection. Camera runs locally; nothing leaves your device.
-  </p>
-  <button class="btn" id="btn-start">Initialize hand tracking</button>
-  <button class="btn ghost" id="btn-mouse">Continue without camera</button>
-  <div class="keys">TIP: if the embedded preview blocks the webcam, download this file and open it directly in your browser.</div>
-</div>
+  <div id="boot">
+    <h2>HOLOSPHERE</h2>
+    <p>
+      Gesture-controlled volumetric projection.<br><br>
+      Open your hand to expand the sphere &mdash; close your fist to collapse it into the core.
+      Move your hand to steer the projection. Camera runs locally; nothing leaves your device.
+    </p>
+    <button class="btn" id="btn-start">Initialize hand tracking</button>
+    <button class="btn ghost" id="btn-mouse">Continue without camera</button>
+    <div class="keys">TIP: if the embedded preview blocks the webcam, download this file and open it directly in your
+      browser.</div>
+  </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
-<script>
-"use strict";
-/* ============================================================
-   HOLOSPHERE — pixel-particle sphere driven by hand gestures
-   ============================================================ */
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script>
+    "use strict";
+    /* ============================================================
+       HOLOSPHERE — pixel-particle sphere driven by hand gestures
+       ============================================================ */
 
-const stage = document.getElementById('stage');
-const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const stage = document.getElementById('stage');
+    const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/* ---------- renderer / scene ---------- */
-const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.setSize(innerWidth, innerHeight);
-stage.appendChild(renderer.domElement);
+    /* ---------- renderer / scene ---------- */
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    stage.appendChild(renderer.domElement);
 
-const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2(0x02060c, 0.055);
+    const scene = new THREE.Scene();
+    scene.fog = new THREE.FogExp2(0x02060c, 0.055);
 
-const camera = new THREE.PerspectiveCamera(50, innerWidth/innerHeight, 0.1, 100);
-camera.position.set(0, 0.6, 9.5);
-camera.lookAt(0, 0.4, 0);
+    const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 100);
+    camera.position.set(0, 0.6, 9.5);
+    camera.lookAt(0, 0.4, 0);
 
-const COL_CYAN   = new THREE.Color(0x4be8ff);
-const COL_BLUE   = new THREE.Color(0x2f7bff);
-const COL_VIOLET = new THREE.Color(0x8a7bff);
+    const COL_CYAN = new THREE.Color(0x4be8ff);
+    const COL_BLUE = new THREE.Color(0x2f7bff);
+    const COL_VIOLET = new THREE.Color(0x8a7bff);
 
-/* ============================================================
-   1. THE SPHERE — 12k "pixel" particles on fibonacci shells
-   ============================================================ */
-const N = 12000;
-const dirs  = new Float32Array(N*3);
-const seeds = new Float32Array(N);
-const shells= new Float32Array(N);
+    /* ============================================================
+       1. THE SPHERE — 12k "pixel" particles on fibonacci shells
+       ============================================================ */
+    const N = 12000;
+    const dirs = new Float32Array(N * 3);
+    const seeds = new Float32Array(N);
+    const shells = new Float32Array(N);
 
-const GA = Math.PI * (3 - Math.sqrt(5)); // golden angle
-for(let i=0;i<N;i++){
-  const t = i / N;
-  const y = 1 - t*2;
-  const r = Math.sqrt(Math.max(0, 1 - y*y));
-  const th = GA * i;
-  dirs[i*3]   = Math.cos(th)*r;
-  dirs[i*3+1] = y;
-  dirs[i*3+2] = Math.sin(th)*r;
-  seeds[i] = Math.random();
-  // 78% outer skin, the rest fill inner shells for volumetric depth
-  shells[i] = (Math.random() < 0.78) ? 1.0 : 0.35 + Math.random()*0.55;
-}
+    const GA = Math.PI * (3 - Math.sqrt(5)); // golden angle
+    for (let i = 0; i < N; i++) {
+      const t = i / N;
+      const y = 1 - t * 2;
+      const r = Math.sqrt(Math.max(0, 1 - y * y));
+      const th = GA * i;
+      dirs[i * 3] = Math.cos(th) * r;
+      dirs[i * 3 + 1] = y;
+      dirs[i * 3 + 2] = Math.sin(th) * r;
+      seeds[i] = Math.random();
+      // 78% outer skin, the rest fill inner shells for volumetric depth
+      shells[i] = (Math.random() < 0.78) ? 1.0 : 0.35 + Math.random() * 0.55;
+    }
 
-const sphereGeo = new THREE.BufferGeometry();
-sphereGeo.setAttribute('position', new THREE.BufferAttribute(dirs, 3)); // placeholder
-sphereGeo.setAttribute('aDir',   new THREE.BufferAttribute(dirs, 3));
-sphereGeo.setAttribute('aSeed',  new THREE.BufferAttribute(seeds, 1));
-sphereGeo.setAttribute('aShell', new THREE.BufferAttribute(shells, 1));
+    const sphereGeo = new THREE.BufferGeometry();
+    sphereGeo.setAttribute('position', new THREE.BufferAttribute(dirs, 3)); // placeholder
+    sphereGeo.setAttribute('aDir', new THREE.BufferAttribute(dirs, 3));
+    sphereGeo.setAttribute('aSeed', new THREE.BufferAttribute(seeds, 1));
+    sphereGeo.setAttribute('aShell', new THREE.BufferAttribute(shells, 1));
 
-const sphereUniforms = {
-  uTime:   {value:0},
-  uRadius: {value:1.4},
-  uChaos:  {value:0.6},   // 1 = fist (swirling collapse), 0 = open
-  uPulse:  {value:0},
-  uPixel:  {value: Math.min(devicePixelRatio,2)},
-  uColA:   {value: COL_CYAN},
-  uColB:   {value: COL_VIOLET},
-};
+    const sphereUniforms = {
+      uTime: { value: 0 },
+      uRadius: { value: 1.4 },
+      uChaos: { value: 0.6 },   // 1 = fist (swirling collapse), 0 = open
+      uPulse: { value: 0 },
+      uPixel: { value: Math.min(devicePixelRatio, 2) },
+      uColA: { value: COL_CYAN },
+      uColB: { value: COL_VIOLET },
+    };
 
-const sphereMat = new THREE.ShaderMaterial({
-  uniforms: sphereUniforms,
-  transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
-  vertexShader:`
+    const sphereMat = new THREE.ShaderMaterial({
+      uniforms: sphereUniforms,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      vertexShader: `
     attribute vec3  aDir;
     attribute float aSeed;
     attribute float aShell;
@@ -329,7 +669,7 @@ const sphereMat = new THREE.ShaderMaterial({
       vec3 nrm = normalize(mat3(modelViewMatrix) * aDir);
       vShade = 1.0 - abs(nrm.z);
     }`,
-  fragmentShader:`
+      fragmentShader: `
     uniform float uTime, uChaos;
     uniform vec3 uColA, uColB;
     varying float vSeed, vShade, vShell, vCond;
@@ -358,61 +698,61 @@ const sphereMat = new THREE.ShaderMaterial({
       gl_FragColor = vec4(col, alpha * fade);
       if(gl_FragColor.a < 0.015) discard;
     }`
-});
+    });
 
-const sphere = new THREE.Points(sphereGeo, sphereMat);
-sphere.position.y = 0.55;
-scene.add(sphere);
+    const sphere = new THREE.Points(sphereGeo, sphereMat);
+    sphere.position.y = 0.55;
+    scene.add(sphere);
 
-/* -- equatorial data rings (two counter-rotating particle rings) -- */
-function makeRing(radius, count, tilt){
-  const g = new THREE.BufferGeometry();
-  const p = new Float32Array(count*3), sd = new Float32Array(count);
-  for(let i=0;i<count;i++){
-    const a = (i/count)*Math.PI*2;
-    p[i*3]=Math.cos(a)*radius; p[i*3+1]=0; p[i*3+2]=Math.sin(a)*radius;
-    sd[i]=Math.random();
-  }
-  g.setAttribute('position', new THREE.BufferAttribute(p,3));
-  g.setAttribute('aSeed', new THREE.BufferAttribute(sd,1));
-  const m = new THREE.ShaderMaterial({
-    uniforms:{uTime:sphereUniforms.uTime, uPixel:sphereUniforms.uPixel, uCol:{value:COL_CYAN}, uOp:{value:1}},
-    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
-    vertexShader:`
+    /* -- equatorial data rings (two counter-rotating particle rings) -- */
+    function makeRing(radius, count, tilt) {
+      const g = new THREE.BufferGeometry();
+      const p = new Float32Array(count * 3), sd = new Float32Array(count);
+      for (let i = 0; i < count; i++) {
+        const a = (i / count) * Math.PI * 2;
+        p[i * 3] = Math.cos(a) * radius; p[i * 3 + 1] = 0; p[i * 3 + 2] = Math.sin(a) * radius;
+        sd[i] = Math.random();
+      }
+      g.setAttribute('position', new THREE.BufferAttribute(p, 3));
+      g.setAttribute('aSeed', new THREE.BufferAttribute(sd, 1));
+      const m = new THREE.ShaderMaterial({
+        uniforms: { uTime: sphereUniforms.uTime, uPixel: sphereUniforms.uPixel, uCol: { value: COL_CYAN }, uOp: { value: 1 } },
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        vertexShader: `
       attribute float aSeed; uniform float uTime,uPixel; varying float vS;
       void main(){ vS=aSeed;
         vec4 mv = modelViewMatrix*vec4(position,1.0);
         gl_Position = projectionMatrix*mv;
         gl_PointSize = (1.2+aSeed*1.6)*uPixel*(26.0/-mv.z);
       }`,
-    fragmentShader:`
+        fragmentShader: `
       uniform float uTime,uOp; uniform vec3 uCol; varying float vS;
       void main(){
         float d=length(gl_PointCoord-0.5);
         float a=(1.0-smoothstep(0.1,0.5,d)) * (0.35+0.65*sin(uTime*4.0+vS*40.0));
         gl_FragColor=vec4(uCol, a*0.7*uOp);
       }`
-  });
-  const ring = new THREE.Points(g,m);
-  ring.rotation.x = tilt;
-  return ring;
-}
-const ringA = makeRing(1.0, 420, 0.35);
-const ringB = makeRing(1.0, 300, -0.55);
-sphere.add(ringA); sphere.add(ringB);
+      });
+      const ring = new THREE.Points(g, m);
+      ring.rotation.x = tilt;
+      return ring;
+    }
+    const ringA = makeRing(1.0, 420, 0.35);
+    const ringB = makeRing(1.0, 300, -0.55);
+    sphere.add(ringA); sphere.add(ringB);
 
-/* ============================================================
-   2. THE PROJECTOR — beam cone, emitter base, floor grid, dust
-   ============================================================ */
-const EMITTER_Y = -2.6;
+    /* ============================================================
+       2. THE PROJECTOR — beam cone, emitter base, floor grid, dust
+       ============================================================ */
+    const EMITTER_Y = -2.6;
 
-/* beam cone */
-const beamGeo = new THREE.CylinderGeometry(2.05, 0.14, 3.2, 48, 1, true);
-const beamMat = new THREE.ShaderMaterial({
-  uniforms:{uTime:sphereUniforms.uTime, uCol:{value:COL_CYAN}, uStrength:{value:1}},
-  transparent:true, depthWrite:false, side:THREE.DoubleSide, blending:THREE.AdditiveBlending,
-  vertexShader:`varying vec2 vUv; void main(){vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
-  fragmentShader:`
+    /* beam cone */
+    const beamGeo = new THREE.CylinderGeometry(2.05, 0.14, 3.2, 48, 1, true);
+    const beamMat = new THREE.ShaderMaterial({
+      uniforms: { uTime: sphereUniforms.uTime, uCol: { value: COL_CYAN }, uStrength: { value: 1 } },
+      transparent: true, depthWrite: false, side: THREE.DoubleSide, blending: THREE.AdditiveBlending,
+      vertexShader: `varying vec2 vUv; void main(){vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+      fragmentShader: `
     uniform float uTime,uStrength; uniform vec3 uCol; varying vec2 vUv;
     void main(){
       float grad = pow(1.0 - vUv.y, 1.6) * 0.35 + 0.05;           // bright at base
@@ -421,58 +761,58 @@ const beamMat = new THREE.ShaderMaterial({
       float a = grad * stripes * (0.5 + 0.5*sweep) * uStrength;
       gl_FragColor = vec4(uCol, a*0.5);
     }`
-});
-const beam = new THREE.Mesh(beamGeo, beamMat);
-beam.position.y = EMITTER_Y + 1.6;
-scene.add(beam);
+    });
+    const beam = new THREE.Mesh(beamGeo, beamMat);
+    beam.position.y = EMITTER_Y + 1.6;
+    scene.add(beam);
 
-/* emitter rings on the floor */
-const gridHelper = new THREE.PolarGridHelper(3.2, 12, 6, 64, 0x1c6f8c, 0x0d3547);
-gridHelper.position.y = EMITTER_Y;
-gridHelper.material.transparent = true;
-gridHelper.material.opacity = 0.5;
-scene.add(gridHelper);
+    /* emitter rings on the floor */
+    const gridHelper = new THREE.PolarGridHelper(3.2, 12, 6, 64, 0x1c6f8c, 0x0d3547);
+    gridHelper.position.y = EMITTER_Y;
+    gridHelper.material.transparent = true;
+    gridHelper.material.opacity = 0.5;
+    scene.add(gridHelper);
 
-/* glowing emitter disc (sprite) */
-function glowTexture(inner, outer){
-  const c = document.createElement('canvas'); c.width=c.height=256;
-  const x = c.getContext('2d');
-  const g = x.createRadialGradient(128,128,0,128,128,128);
-  g.addColorStop(0, inner); g.addColorStop(0.35,'rgba(75,232,255,.28)'); g.addColorStop(1, outer);
-  x.fillStyle=g; x.fillRect(0,0,256,256);
-  return new THREE.CanvasTexture(c);
-}
-const emitterGlow = new THREE.Sprite(new THREE.SpriteMaterial({
-  map: glowTexture('rgba(190,250,255,.9)','rgba(75,232,255,0)'),
-  blending:THREE.AdditiveBlending, depthWrite:false, transparent:true
-}));
-emitterGlow.scale.set(2.6, 0.7, 1);
-emitterGlow.position.y = EMITTER_Y + 0.03;
-scene.add(emitterGlow);
+    /* glowing emitter disc (sprite) */
+    function glowTexture(inner, outer) {
+      const c = document.createElement('canvas'); c.width = c.height = 256;
+      const x = c.getContext('2d');
+      const g = x.createRadialGradient(128, 128, 0, 128, 128, 128);
+      g.addColorStop(0, inner); g.addColorStop(0.35, 'rgba(75,232,255,.28)'); g.addColorStop(1, outer);
+      x.fillStyle = g; x.fillRect(0, 0, 256, 256);
+      return new THREE.CanvasTexture(c);
+    }
+    const emitterGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowTexture('rgba(190,250,255,.9)', 'rgba(75,232,255,0)'),
+      blending: THREE.AdditiveBlending, depthWrite: false, transparent: true
+    }));
+    emitterGlow.scale.set(2.6, 0.7, 1);
+    emitterGlow.position.y = EMITTER_Y + 0.03;
+    scene.add(emitterGlow);
 
-/* halo behind the sphere for fake bloom */
-const halo = new THREE.Sprite(new THREE.SpriteMaterial({
-  map: glowTexture('rgba(75,232,255,.35)','rgba(75,232,255,0)'),
-  blending:THREE.AdditiveBlending, depthWrite:false, transparent:true, opacity:0.9
-}));
-halo.scale.set(7,7,1);
-sphere.add(halo);
+    /* halo behind the sphere for fake bloom */
+    const halo = new THREE.Sprite(new THREE.SpriteMaterial({
+      map: glowTexture('rgba(75,232,255,.35)', 'rgba(75,232,255,0)'),
+      blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0.9
+    }));
+    halo.scale.set(7, 7, 1);
+    sphere.add(halo);
 
-/* ambient dust motes drifting in the beam */
-const DUST = 500;
-const dustGeo = new THREE.BufferGeometry();
-const dp = new Float32Array(DUST*3), ds = new Float32Array(DUST);
-for(let i=0;i<DUST;i++){
-  const a=Math.random()*Math.PI*2, rr=Math.pow(Math.random(),0.6)*2.6;
-  dp[i*3]=Math.cos(a)*rr; dp[i*3+1]=EMITTER_Y+Math.random()*5.5; dp[i*3+2]=Math.sin(a)*rr;
-  ds[i]=Math.random();
-}
-dustGeo.setAttribute('position', new THREE.BufferAttribute(dp,3));
-dustGeo.setAttribute('aSeed', new THREE.BufferAttribute(ds,1));
-const dustMat = new THREE.ShaderMaterial({
-  uniforms:{uTime:sphereUniforms.uTime, uPixel:sphereUniforms.uPixel},
-  transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
-  vertexShader:`
+    /* ambient dust motes drifting in the beam */
+    const DUST = 500;
+    const dustGeo = new THREE.BufferGeometry();
+    const dp = new Float32Array(DUST * 3), ds = new Float32Array(DUST);
+    for (let i = 0; i < DUST; i++) {
+      const a = Math.random() * Math.PI * 2, rr = Math.pow(Math.random(), 0.6) * 2.6;
+      dp[i * 3] = Math.cos(a) * rr; dp[i * 3 + 1] = EMITTER_Y + Math.random() * 5.5; dp[i * 3 + 2] = Math.sin(a) * rr;
+      ds[i] = Math.random();
+    }
+    dustGeo.setAttribute('position', new THREE.BufferAttribute(dp, 3));
+    dustGeo.setAttribute('aSeed', new THREE.BufferAttribute(ds, 1));
+    const dustMat = new THREE.ShaderMaterial({
+      uniforms: { uTime: sphereUniforms.uTime, uPixel: sphereUniforms.uPixel },
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      vertexShader: `
     attribute float aSeed; uniform float uTime,uPixel; varying float vS;
     void main(){ vS=aSeed;
       vec3 p = position;
@@ -482,415 +822,431 @@ const dustMat = new THREE.ShaderMaterial({
       gl_Position = projectionMatrix*mv;
       gl_PointSize = (0.8+aSeed*1.4)*uPixel*(26.0/-mv.z);
     }`,
-  fragmentShader:`
+      fragmentShader: `
     uniform float uTime; varying float vS;
     void main(){
       float d=length(gl_PointCoord-0.5);
       float a=(1.0-smoothstep(0.0,0.5,d))*(0.25+0.35*sin(uTime*3.0+vS*50.0));
       gl_FragColor=vec4(0.4,0.85,1.0,a*0.4);
     }`
-});
-scene.add(new THREE.Points(dustGeo, dustMat));
-
-/* ============================================================
-   3. CONTROL STATE — hand tracking / mouse fallback
-   ============================================================ */
-const state = {
-  openness: 0.55, targetOpen: 0.55,
-  tx: 0, ty: 0.55,          // target sphere position
-  hasHand: false, mode: 'standby',
-  radius: 1.4, radiusVel: 0,
-  openVel: 0,                           // grip-change speed (gates rotation)
-  rotSpeed: 0,                          // |hand angular velocity| (gates size)
-  handVel: new THREE.Vector3(),         // hand-imparted angular velocity, rad/s
-};
-
-const $ = id => document.getElementById(id);
-const toast = (msg)=>{ const t=$('toast'); t.textContent=msg; t.classList.add('show');
-  setTimeout(()=>t.classList.remove('show'), 3800); };
-
-/* ----- hand math ----- */
-const dist = (a,b)=>Math.hypot(a.x-b.x, a.y-b.y, (a.z||0)-(b.z||0));
-/* Openness metric v3 — palm-center proximity.
-   The previous "straightness" (chord/bones) metric was NON-monotonic: the
-   knuckle→tip chord is shortest at a HALF fist, then grows again as the tip
-   tucks past toward the palm — so a full fist read as more open than a half
-   fist. Instead we measure how far the fingertips (and PIP knuckles, which
-   stabilise the signal) are from the palm centre, normalised by that finger's
-   maximum possible reach (palmcentre→MCP + bone lengths). This ratio is
-   scale/rotation invariant AND shrinks monotonically as the fist closes:
-   tips travel continuously toward the palm and stay there.
-     fully open  ≈ 0.90+   half fist ≈ 0.65   tight fist ≈ 0.35
-   The window mapping ext→0..1 AUTO-CALIBRATES: exceed either end and that end
-   stretches to your actual range of motion. Press D for live readouts. */
-const CAL_DEF = { lo: 0.40, hi: 0.86 };
-const cal = { lo: CAL_DEF.lo, hi: CAL_DEF.hi };
-const FINGERS = [[5,6,7,8],[9,10,11,12],[13,14,15,16],[17,18,19,20]]; // index..pinky
-const PALM_IDS = [0,5,9,13,17];
-const dbg = { ext: 0, per: [0,0,0,0], lin: 0, open: 0 };
-function palmCenter(lm){
-  let x=0,y=0,z=0;
-  for(const i of PALM_IDS){ x+=lm[i].x; y+=lm[i].y; z+=(lm[i].z||0); }
-  const n = PALM_IDS.length;
-  return {x:x/n, y:y/n, z:z/n};
-}
-function handExt(lm){
-  const pc = palmCenter(lm);
-  let sum = 0;
-  for(let f=0; f<FINGERS.length; f++){
-    const [mcp,pip,dip,tip] = FINGERS[f];
-    const b1 = dist(lm[mcp],lm[pip]);
-    const bones = b1 + dist(lm[pip],lm[dip]) + dist(lm[dip],lm[tip]);
-    const base  = dist(pc, lm[mcp]);
-    const rTip  = dist(pc, lm[tip]) / (base + bones + 1e-6);
-    const rPip  = dist(pc, lm[pip]) / (base + b1 + 1e-6);
-    const e = 0.7*rTip + 0.3*rPip;
-    dbg.per[f] = e;
-    sum += e;
-  }
-  dbg.ext = sum / FINGERS.length;
-  return dbg.ext;
-}
-/* Auto-calibration. Fed MEDIAN-FILTERED ext (so a single glitch frame can't
-   blow the window open). Exceeding an end pulls that end to the new extreme
-   within a few frames — it becomes the new 0% / 100%. A very slow relaxation
-   toward the defaults (~3%/s) heals the window if a brief tracking error ever
-   over-stretched it; genuine poses re-expand it faster than it decays. */
-function mapOpenness(ext){
-  if(ext > cal.hi) cal.hi += (ext - cal.hi) * 0.5;
-  if(ext < cal.lo) cal.lo += (ext - cal.lo) * 0.5;
-  cal.hi += (CAL_DEF.hi - cal.hi) * 0.0012;
-  cal.lo += (CAL_DEF.lo - cal.lo) * 0.0012;
-  const lin = THREE.MathUtils.clamp((ext - cal.lo) / (cal.hi - cal.lo), 0, 1);
-  // The palm-proximity metric is cosine-flat at the START of a curl: at full
-  // extension the tips move perpendicular to the palm-centre direction, so
-  // ext changes only at second order for the first part of the squeeze.
-  // This remap expands top-end sensitivity so early closing registers
-  // immediately, at the cost of slightly gentler response near the fist.
-  dbg.lin = lin;
-  dbg.open = 1 - Math.pow(1 - lin, 0.58);
-  return dbg.open;
-}
-
-/* ----- hand orientation → quaternion -----
-   Build an orthonormal basis from the palm: knuckle line (x), wrist→middle (y),
-   palm normal (z). Mirrored to match the on-screen (flipped) camera preview. */
-const _v = p => new THREE.Vector3(-(p.x - 0.5), -(p.y - 0.5), -(p.z || 0));
-function handQuaternion(lm){
-  const wrist = _v(lm[0]), indexMcp = _v(lm[5]), pinkyMcp = _v(lm[17]), middleMcp = _v(lm[9]);
-  let xAxis = new THREE.Vector3().subVectors(pinkyMcp, indexMcp);
-  let yAxis = new THREE.Vector3().subVectors(middleMcp, wrist);
-  let zAxis = new THREE.Vector3().crossVectors(xAxis, yAxis).normalize();
-  xAxis.crossVectors(yAxis, zAxis).normalize();
-  yAxis.normalize();
-  const m = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
-  return new THREE.Quaternion().setFromRotationMatrix(m);
-}
-
-/* ----- signal smoothing (anti-flicker) -----
-   MediaPipe landmarks jitter frame-to-frame. A 3-sample median rejects
-   single-frame spikes with zero added lag, then a light exponential blend
-   (α≈0.5 ≙ a couple of frames) takes the remaining edge off. */
-const filt = { open: [], tx: null, ty: null };
-function median3(a){
-  if(a.length < 3) return a[a.length-1];
-  const [x,y,z] = a;
-  return Math.max(Math.min(x,y), Math.min(Math.max(x,y), z));
-}
-function ema(prev, next, a){ return prev === null ? next : prev + (next - prev) * a; }
-function resetFilters(){
-  filt.open.length = 0; filt.tx = null; filt.ty = null;
-  state.openVel = 0; prevHandQ = null;   // handVel decays in the main loop — no snap
-}
-
-/* quaternion hygiene: q and -q are the same rotation; pick the sign nearest ref */
-function hemisphere(q, ref){ if(q.dot(ref) < 0){ q.x*=-1; q.y*=-1; q.z*=-1; q.w*=-1; } return q; }
-
-/* ----- relative hand rotation → angular velocity -----
-   Instead of steering the sphere toward the hand's ABSOLUTE orientation (which
-   fights the natural spin and stutters on every tracking wobble), we measure
-   the DELTA rotation of the hand between tracking frames, turn it into an
-   angular velocity, and ADD it to the sphere's constant baseline spin.
-   A still hand contributes exactly zero. Noise defence, in order:
-   per-frame flip rejection (huge deltas are tracking errors, not motion),
-   a hard speed cap, the grip-velocity gate (clenching isn't rotation),
-   and an EMA on the velocity vector. */
-let prevHandQ = null, lastFeedT = 0;
-const _dq = new THREE.Quaternion(), _dVel = new THREE.Vector3();
-function feedHandRotation(lm){
-  const raw = handQuaternion(lm);
-  const now = performance.now() / 1000;
-  if(!prevHandQ){ prevHandQ = raw.clone(); lastFeedT = now; return; }
-  // A fist does not provide a stable palm basis: curled fingers can occlude
-  // MCP landmarks and make MediaPipe report a large, false palm rotation.
-  // While gripping (or changing grip), retain only the sphere's idle spin and
-  // keep rebasing so releasing the fist cannot inject a deferred delta.
-  if(state.targetOpen < 0.45 || state.openVel > 0.012){
-    prevHandQ.copy(raw);
-    lastFeedT = now;
-    state.handVel.set(0, 0, 0);
-    state.rotSpeed = 0;
-    return;
-  }
-  const fdt = THREE.MathUtils.clamp(now - lastFeedT, 1/120, 1/10);
-  lastFeedT = now;
-  hemisphere(raw, prevHandQ);
-  // delta = raw ∘ prev⁻¹ : the world-frame rotation since the last frame
-  _dq.copy(prevHandQ).invert().premultiply(raw);
-  if(_dq.w < 0){ _dq.x*=-1; _dq.y*=-1; _dq.z*=-1; _dq.w*=-1; }  // shortest arc
-  const ang = 2 * Math.acos(Math.min(1, _dq.w));
-  const sf  = Math.sqrt(Math.max(0, 1 - _dq.w*_dq.w));
-  prevHandQ.copy(raw);
-  if(ang > 0.55) return;                          // single-frame flip: discard
-  if(sf > 1e-5){
-    // grip gate: clenching shakes the palm basis — don't turn that into spin
-    const stab  = THREE.MathUtils.clamp(1 - state.openVel * 28, 0, 1);
-    const speed = Math.min(ang / fdt, 4.0) * stab;               // rad/s, capped
-    _dVel.set(_dq.x/sf, _dq.y/sf, _dq.z/sf).multiplyScalar(speed);
-  } else _dVel.set(0, 0, 0);
-  state.handVel.lerp(_dVel, 0.4);                 // smooth the velocity vector
-  state.rotSpeed = state.handVel.length();
-}
-
-/* ----- debug readout (press D): raw metric for calibration ----- */
-let debugOn = false, dbgLogTimer = 0;
-addEventListener('keydown', e=>{
-  if(e.key === 'd' || e.key === 'D'){
-    debugOn = !debugOn;
-    $('debug').classList.toggle('on', debugOn);
-    toast(debugOn ? 'DEBUG ON — EXT IS THE RAW VALUE TO CALIBRATE' : 'DEBUG OFF');
-  }
-});
-function updateDebug(dt){
-  if(!debugOn) return;
-  const p = dbg.per.map(v=>v.toFixed(3)).join('  ');
-  $('debug').textContent =
-    `EXT ${dbg.ext.toFixed(3)}  →  LIN ${dbg.lin.toFixed(3)}  →  OPEN ${dbg.open.toFixed(3)}   (auto-cal ${cal.lo.toFixed(3)}–${cal.hi.toFixed(3)})\n` +
-    `per-finger [idx mid rng pnk]  ${p}\n` +
-    `smoothed targetOpen ${state.targetOpen.toFixed(3)}   gripVel ${state.openVel.toFixed(4)}   rotVel ${state.rotSpeed.toFixed(3)}   radius ${state.radius.toFixed(2)}`;
-  dbgLogTimer -= dt;
-  if(dbgLogTimer <= 0){
-    dbgLogTimer = 0.5;
-    console.log('[holosphere]', JSON.stringify({
-      ext:+dbg.ext.toFixed(4), open:+dbg.open.toFixed(4),
-      cal:[+cal.lo.toFixed(4), +cal.hi.toFixed(4)],
-      fingers:dbg.per.map(v=>+v.toFixed(4))
-    }));
-  }
-}
-
-/* ----- landmark preview drawing ----- */
-const CONN = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
-  [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
-function drawHand(lm){
-  const cv = $('cam-overlay'), ctx = cv.getContext('2d');
-  cv.width = cv.clientWidth; cv.height = cv.clientHeight;
-  ctx.clearRect(0,0,cv.width,cv.height);
-  if(!lm) return;
-  const px = p => [(1-p.x)*cv.width, p.y*cv.height];  // mirrored
-  ctx.strokeStyle='rgba(75,232,255,.85)'; ctx.lineWidth=1.2;
-  ctx.shadowColor='rgba(75,232,255,.8)'; ctx.shadowBlur=4;
-  for(const [a,b] of CONN){
-    const [x1,y1]=px(lm[a]), [x2,y2]=px(lm[b]);
-    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
-  }
-  ctx.fillStyle='#dff9ff';
-  for(const p of lm){ const [x,y]=px(p); ctx.fillRect(x-1.5,y-1.5,3,3); }
-}
-
-/* ----- MediaPipe init ----- */
-let lostTimer = null;
-async function startTracking(){
-  $('boot').style.display='none';
-  if(typeof Hands === 'undefined' || typeof Camera === 'undefined'){
-    toast('TRACKING LIB UNAVAILABLE — SWITCHING TO MOUSE MODE');
-    startMouseMode(); return;
-  }
-  const video = $('cam-video');
-  try{
-    const hands = new Hands({locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`});
-    hands.setOptions({maxNumHands:1, modelComplexity:1, minDetectionConfidence:0.6, minTrackingConfidence:0.55});
-    hands.onResults(res=>{
-      const lm = res.multiHandLandmarks && res.multiHandLandmarks[0];
-      if(lm){
-        state.hasHand = true;
-        clearTimeout(lostTimer);
-        lostTimer = setTimeout(()=>{ state.hasHand=false; resetFilters(); }, 350);
-
-        // openness: raw ext → 3-frame median (spike rejection) → auto-cal map → light EMA
-        filt.open.push(handExt(lm));
-        if(filt.open.length > 3) filt.open.shift();
-        const open = mapOpenness(median3(filt.open));
-        const pOpen = state.targetOpen;
-        // rotation gate: fast rotation self-occludes fingers and corrupts the
-        // openness metric — damp size changes while the hand is rotating
-        const rotGate = THREE.MathUtils.clamp(1 - state.rotSpeed * 0.45, 0.15, 1);
-        state.targetOpen = ema(filt.open.length > 1 ? state.targetOpen : null, open, 0.5 * rotGate);
-        // grip-change speed (per tracking frame), used to gate orientation
-        state.openVel = ema(state.openVel, Math.abs(state.targetOpen - pOpen), 0.35);
-        // palm centre drives position: mirror-view mapping (hand moves right →
-        // sphere moves right on screen), at reduced gain so it stays centred
-        const cx = (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x)/5;
-        const cy = (lm[0].y + lm[5].y + lm[9].y + lm[13].y + lm[17].y)/5;
-        filt.tx = ema(filt.tx, (0.5 - cx) * 2.4, 0.55);
-        filt.ty = ema(filt.ty, (0.5 - cy) * 1.7 + 0.55, 0.55);
-        state.tx = filt.tx;
-        state.ty = filt.ty;
-        // hand rotation deltas → angular velocity added to the natural spin
-        feedHandRotation(lm);
-        drawHand(lm);
-      } else drawHand(null);
     });
-    const cam = new Camera(video, {
-      onFrame: async ()=>{ await hands.send({image: video}); },
-      width: 480, height: 360
+    scene.add(new THREE.Points(dustGeo, dustMat));
+
+    /* ============================================================
+       3. CONTROL STATE — hand tracking / mouse fallback
+       ============================================================ */
+    const state = {
+      openness: 0.55, targetOpen: 0.55,
+      tx: 0, ty: 0.55,          // target sphere position
+      hasHand: false, mode: 'standby',
+      radius: 1.4, radiusVel: 0,
+      openVel: 0,
+      handAngle: 0, targetHandAngle: 0, rawHandAngle: 0,
+      hasOrientation: false,
+      rotSpeed: 0,
+      motion: { positionSpeed: 0, zOrientationSpeed: 0, naturalYSpeed: 0, sphereRotationSpeed: 0 },
+    };
+
+    const $ = id => document.getElementById(id);
+    const toast = (msg) => {
+      const t = $('toast'); t.textContent = msg; t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 3800);
+    };
+
+    /* ----- hand math ----- */
+    const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0));
+    /* Openness metric v3 — palm-center proximity.
+       The previous "straightness" (chord/bones) metric was NON-monotonic: the
+       knuckle→tip chord is shortest at a HALF fist, then grows again as the tip
+       tucks past toward the palm — so a full fist read as more open than a half
+       fist. Instead we measure how far the fingertips (and PIP knuckles, which
+       stabilise the signal) are from the palm centre, normalised by that finger's
+       maximum possible reach (palmcentre→MCP + bone lengths). This ratio is
+       scale/rotation invariant AND shrinks monotonically as the fist closes:
+       tips travel continuously toward the palm and stay there.
+         fully open  ≈ 0.90+   half fist ≈ 0.65   tight fist ≈ 0.35
+       The window mapping ext→0..1 AUTO-CALIBRATES: exceed either end and that end
+       stretches to your actual range of motion. Press D for live readouts. */
+    const CAL_DEF = { lo: 0.40, hi: 0.86 };
+    const cal = { lo: CAL_DEF.lo, hi: CAL_DEF.hi };
+    const FINGERS = [[5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16], [17, 18, 19, 20]]; // index..pinky
+    const PALM_IDS = [0, 5, 9, 13, 17];
+    const dbg = { ext: 0, per: [0, 0, 0, 0], lin: 0, open: 0 };
+    function palmCenter(lm) {
+      let x = 0, y = 0, z = 0;
+      for (const i of PALM_IDS) { x += lm[i].x; y += lm[i].y; z += (lm[i].z || 0); }
+      const n = PALM_IDS.length;
+      return { x: x / n, y: y / n, z: z / n };
+    }
+    function handExt(lm) {
+      const pc = palmCenter(lm);
+      let sum = 0;
+      for (let f = 0; f < FINGERS.length; f++) {
+        const [mcp, pip, dip, tip] = FINGERS[f];
+        const b1 = dist(lm[mcp], lm[pip]);
+        const bones = b1 + dist(lm[pip], lm[dip]) + dist(lm[dip], lm[tip]);
+        const base = dist(pc, lm[mcp]);
+        const rTip = dist(pc, lm[tip]) / (base + bones + 1e-6);
+        const rPip = dist(pc, lm[pip]) / (base + b1 + 1e-6);
+        const e = 0.7 * rTip + 0.3 * rPip;
+        dbg.per[f] = e;
+        sum += e;
+      }
+      dbg.ext = sum / FINGERS.length;
+      return dbg.ext;
+    }
+    /* Auto-calibration. Fed MEDIAN-FILTERED ext (so a single glitch frame can't
+       blow the window open). Exceeding an end pulls that end to the new extreme
+       within a few frames — it becomes the new 0% / 100%. A very slow relaxation
+       toward the defaults (~3%/s) heals the window if a brief tracking error ever
+       over-stretched it; genuine poses re-expand it faster than it decays. */
+    function mapOpenness(ext) {
+      if (ext > cal.hi) cal.hi += (ext - cal.hi) * 0.5;
+      if (ext < cal.lo) cal.lo += (ext - cal.lo) * 0.5;
+      cal.hi += (CAL_DEF.hi - cal.hi) * 0.0012;
+      cal.lo += (CAL_DEF.lo - cal.lo) * 0.0012;
+      const lin = THREE.MathUtils.clamp((ext - cal.lo) / (cal.hi - cal.lo), 0, 1);
+      // The palm-proximity metric is cosine-flat at the START of a curl: at full
+      // extension the tips move perpendicular to the palm-centre direction, so
+      // ext changes only at second order for the first part of the squeeze.
+      // This remap expands top-end sensitivity so early closing registers
+      // immediately, at the cost of slightly gentler response near the fist.
+      dbg.lin = lin;
+      dbg.open = 1 - Math.pow(1 - lin, 0.58);
+      return dbg.open;
+    }
+
+    /* ----- signal smoothing (anti-flicker) -----
+       MediaPipe landmarks jitter frame-to-frame. Openness uses a short median;
+       position uses a longer window plus a dead zone, so the sphere only responds
+       after a hand displacement persists across several tracking frames. */
+    const filt = { open: [], px: [], py: [], tx: null, ty: null, orientation: [] };
+    const POSITION_WINDOW = 5;
+    const POSITION_DEADZONE = 0.055; // scene units; ignores stationary-hand tremor
+    const ORIENTATION_WINDOW = 7;
+    const ORIENTATION_DEADZONE = THREE.MathUtils.degToRad(3);
+    const ORIENTATION_RESPONSE = 7;
+    function median3(a) {
+      if (a.length < 3) return a[a.length - 1];
+      const [x, y, z] = a;
+      return Math.max(Math.min(x, y), Math.min(Math.max(x, y), z));
+    }
+    function median(a) {
+      const values = a.slice().sort((x, y) => x - y);
+      return values[Math.floor(values.length / 2)];
+    }
+    function ema(prev, next, a) { return prev === null ? next : prev + (next - prev) * a; }
+    function angleDelta(to, from) {
+      return Math.atan2(Math.sin(to - from), Math.cos(to - from));
+    }
+    function resetFilters() {
+      filt.open.length = 0; filt.px.length = 0; filt.py.length = 0; filt.orientation.length = 0;
+      filt.tx = null; filt.ty = null;
+      state.openVel = 0;
+      state.hasOrientation = false;
+      state.targetHandAngle = state.handAngle;
+    }
+
+    /* ----- screen-relative hand direction → absolute Z orientation -----
+       The stable palm centreline runs from the wrist through the middle-finger
+       MCP. It points in the same direction as an extended middle finger without
+       becoming unreliable when the finger bends. Angles are measured in the
+       mirrored camera view: screen-up is 0 and screen-right is -PI/2 in Three.js.
+       Circular averaging handles the -PI/PI seam; the dead zone prevents a still
+       hand from continually changing the target. */
+    function feedHandOrientation(lm) {
+      const dx = lm[0].x - lm[9].x; // mirrored screen-space X
+      const dy = lm[9].y - lm[0].y; // screen-space Y points downward
+      const raw = Math.atan2(-dx, -dy);
+      state.rawHandAngle = raw;
+
+      filt.orientation.push(raw);
+      if (filt.orientation.length > ORIENTATION_WINDOW) filt.orientation.shift();
+      let sinSum = 0, cosSum = 0;
+      for (const angle of filt.orientation) {
+        sinSum += Math.sin(angle);
+        cosSum += Math.cos(angle);
+      }
+      const filtered = Math.atan2(sinSum, cosSum);
+      if (!state.hasOrientation) {
+        state.targetHandAngle = state.handAngle + angleDelta(filtered, state.handAngle);
+        state.hasOrientation = true;
+        return;
+      }
+      const change = angleDelta(filtered, state.targetHandAngle);
+      if (Math.abs(change) > ORIENTATION_DEADZONE) state.targetHandAngle += change;
+    }
+
+    /* ----- debug readout (press D): raw metric for calibration ----- */
+    let debugOn = false, dbgLogTimer = 0;
+    addEventListener('keydown', e => {
+      if (e.key === 'd' || e.key === 'D') {
+        debugOn = !debugOn;
+        $('debug').classList.toggle('on', debugOn);
+        toast(debugOn ? 'DEBUG ON — EXT IS THE RAW VALUE TO CALIBRATE' : 'DEBUG OFF');
+      }
     });
-    await cam.start();
-    $('cam-wrap').classList.add('on');
-    state.mode = 'gesture';
-    $('mode-val').textContent = 'GESTURE';
-    toast('OPTICAL FEED ONLINE — SHOW YOUR HAND');
-  }catch(err){
-    console.warn(err);
-    toast('CAMERA UNAVAILABLE — SWITCHING TO MOUSE MODE');
-    startMouseMode();
-  }
-}
+    function updateDebug(dt) {
+      if (!debugOn) return;
+      const p = dbg.per.map(v => v.toFixed(3)).join('  ');
+      $('debug').textContent =
+        `EXT ${dbg.ext.toFixed(3)}  →  LIN ${dbg.lin.toFixed(3)}  →  OPEN ${dbg.open.toFixed(3)}   (auto-cal ${cal.lo.toFixed(3)}–${cal.hi.toFixed(3)})\n` +
+        `per-finger [idx mid rng pnk]  ${p}\n` +
+        `position ${sphere.position.x.toFixed(3)},${sphere.position.y.toFixed(3)} @ ${state.motion.positionSpeed.toFixed(3)}/s   Z orientation ${THREE.MathUtils.radToDeg(state.handAngle).toFixed(1)}° → ${THREE.MathUtils.radToDeg(state.targetHandAngle).toFixed(1)}°\n` +
+        `Z follow ${state.motion.zOrientationSpeed.toFixed(3)} rad/s   natural Y ${state.motion.naturalYSpeed.toFixed(3)} rad/s   total ${state.motion.sphereRotationSpeed.toFixed(3)} rad/s`;
+      dbgLogTimer -= dt;
+      if (dbgLogTimer <= 0) {
+        dbgLogTimer = 0.5;
+        console.log('[holosphere]', JSON.stringify({
+          ext: +dbg.ext.toFixed(4), open: +dbg.open.toFixed(4),
+          cal: [+cal.lo.toFixed(4), +cal.hi.toFixed(4)],
+          fingers: dbg.per.map(v => +v.toFixed(4)),
+          position: [+sphere.position.x.toFixed(4), +sphere.position.y.toFixed(4)],
+          target: [+state.tx.toFixed(4), +state.ty.toFixed(4)],
+          orientation: {
+            rawDegrees: +THREE.MathUtils.radToDeg(state.rawHandAngle).toFixed(2),
+            targetDegrees: +THREE.MathUtils.radToDeg(state.targetHandAngle).toFixed(2),
+            appliedDegrees: +THREE.MathUtils.radToDeg(state.handAngle).toFixed(2),
+            samples: filt.orientation.length,
+            deadzoneDegrees: +THREE.MathUtils.radToDeg(ORIENTATION_DEADZONE).toFixed(2)
+          },
+          applied: {
+            positionSpeed: +state.motion.positionSpeed.toFixed(4),
+            zOrientationSpeed: +state.motion.zOrientationSpeed.toFixed(4),
+            naturalYSpeed: +state.motion.naturalYSpeed.toFixed(4),
+            sphereRotationSpeed: +state.motion.sphereRotationSpeed.toFixed(4),
+            ringRotationSpeeds: [0, 0],
+            particleRotation: true
+          }
+        }));
+      }
+    }
 
-/* ----- mouse fallback ----- */
-function startMouseMode(){
-  $('boot').style.display='none';
-  state.mode = 'mouse';
-  $('mode-val').textContent = 'MOUSE';
-  $('manual').classList.add('on');
-  toast('MOUSE MODE — MOVE CURSOR / HOLD CLICK TO COLLAPSE / SCROLL = APERTURE');
-}
-addEventListener('mousemove', e=>{
-  if(state.mode!=='mouse' && !(state.mode==='gesture' && !state.hasHand)) return;
-  state.tx = (e.clientX/innerWidth  - 0.5) * 6.0;
-  state.ty = (0.5 - e.clientY/innerHeight) * 4.0 + 0.55;
-});
-addEventListener('mousedown', ()=>{ if(state.mode==='mouse') state.targetOpen = 0; });
-addEventListener('mouseup',   ()=>{ if(state.mode==='mouse') state.targetOpen = $('manual-slider').value/100; });
-addEventListener('wheel', e=>{
-  if(state.mode!=='mouse') return;
-  const s = $('manual-slider');
-  s.value = THREE.MathUtils.clamp(+s.value - Math.sign(e.deltaY)*5, 0, 100);
-  state.targetOpen = s.value/100;
-});
-$('manual-slider').addEventListener('input', e=> state.targetOpen = e.target.value/100);
+    /* ----- landmark preview drawing ----- */
+    const CONN = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11], [11, 12],
+    [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [17, 18], [18, 19], [19, 20], [0, 17]];
+    function drawHand(lm) {
+      const cv = $('cam-overlay'), ctx = cv.getContext('2d');
+      cv.width = cv.clientWidth; cv.height = cv.clientHeight;
+      ctx.clearRect(0, 0, cv.width, cv.height);
+      if (!lm) return;
+      const px = p => [(1 - p.x) * cv.width, p.y * cv.height];  // mirrored
+      ctx.strokeStyle = 'rgba(75,232,255,.85)'; ctx.lineWidth = 1.2;
+      ctx.shadowColor = 'rgba(75,232,255,.8)'; ctx.shadowBlur = 4;
+      for (const [a, b] of CONN) {
+        const [x1, y1] = px(lm[a]), [x2, y2] = px(lm[b]);
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      }
+      ctx.fillStyle = '#dff9ff';
+      for (const p of lm) { const [x, y] = px(p); ctx.fillRect(x - 1.5, y - 1.5, 3, 3); }
+    }
 
-$('btn-start').addEventListener('click', startTracking);
-$('btn-mouse').addEventListener('click', startMouseMode);
+    /* ----- MediaPipe init ----- */
+    let lostTimer = null;
+    async function startTracking() {
+      $('boot').style.display = 'none';
+      if (typeof Hands === 'undefined' || typeof Camera === 'undefined') {
+        toast('TRACKING LIB UNAVAILABLE — SWITCHING TO MOUSE MODE');
+        startMouseMode(); return;
+      }
+      const video = $('cam-video');
+      try {
+        const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+        hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.6, minTrackingConfidence: 0.55 });
+        hands.onResults(res => {
+          const lm = res.multiHandLandmarks && res.multiHandLandmarks[0];
+          if (lm) {
+            state.hasHand = true;
+            clearTimeout(lostTimer);
+            lostTimer = setTimeout(() => { state.hasHand = false; resetFilters(); }, 350);
 
-/* ============================================================
-   4. MAIN LOOP
-   ============================================================ */
-const clock = new THREE.Clock();
-let frames = 0, fpsTimer = 0, glitchTimer = 2 + Math.random()*5, prevOpen = 0.55;
-const MAX_ROT_SPEED = 3.2;   // rad/s hard cap on hand-imparted angular velocity
-const _spinQ = new THREE.Quaternion(), _idleQ = new THREE.Quaternion();
-const _yAxis = new THREE.Vector3(0,1,0), _wAxis = new THREE.Vector3();
+            // openness: raw ext → 3-frame median (spike rejection) → auto-cal map → light EMA
+            filt.open.push(handExt(lm));
+            if (filt.open.length > 3) filt.open.shift();
+            const open = mapOpenness(median3(filt.open));
+            const pOpen = state.targetOpen;
+            // rotation gate: fast rotation self-occludes fingers and corrupts the
+            // openness metric — damp size changes while the hand is rotating
+            const rotGate = THREE.MathUtils.clamp(1 - state.rotSpeed * 0.45, 0.15, 1);
+            state.targetOpen = ema(filt.open.length > 1 ? state.targetOpen : null, open, 0.5 * rotGate);
+            // grip-change speed (per tracking frame), used to gate orientation
+            state.openVel = ema(state.openVel, Math.abs(state.targetOpen - pOpen), 0.35);
+            // Palm centre drives position. Use a five-frame median then a slow
+            // blend, and retain the last target inside a small dead zone. This
+            // removes the natural landmark tremor visible with a still hand.
+            const cx = (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x) / 5;
+            const cy = (lm[0].y + lm[5].y + lm[9].y + lm[13].y + lm[17].y) / 5;
+            filt.px.push((0.5 - cx) * 2.4);
+            filt.py.push((0.5 - cy) * 1.7 + 0.55);
+            if (filt.px.length > POSITION_WINDOW) filt.px.shift();
+            if (filt.py.length > POSITION_WINDOW) filt.py.shift();
+            filt.tx = ema(filt.tx, median(filt.px), 0.28);
+            filt.ty = ema(filt.ty, median(filt.py), 0.28);
+            if (Math.abs(filt.tx - state.tx) > POSITION_DEADZONE)
+              state.tx += (filt.tx - state.tx) * 0.45;
+            if (Math.abs(filt.ty - state.ty) > POSITION_DEADZONE)
+              state.ty += (filt.ty - state.ty) * 0.45;
+            // absolute screen-relative pointing direction → sphere Z orientation
+            feedHandOrientation(lm);
+            drawHand(lm);
+          } else drawHand(null);
+        });
+        const cam = new Camera(video, {
+          onFrame: async () => { await hands.send({ image: video }); },
+          width: 480, height: 360
+        });
+        await cam.start();
+        $('cam-wrap').classList.add('on');
+        state.mode = 'gesture';
+        $('mode-val').textContent = 'GESTURE';
+        toast('OPTICAL FEED ONLINE — SHOW YOUR HAND');
+      } catch (err) {
+        console.warn(err);
+        toast('CAMERA UNAVAILABLE — SWITCHING TO MOUSE MODE');
+        startMouseMode();
+      }
+    }
 
-function animate(){
-  requestAnimationFrame(animate);
-  const dt = Math.min(clock.getDelta(), 0.05);
-  const t  = clock.elapsedTime;
-  sphereUniforms.uTime.value = t;
+    /* ----- mouse fallback ----- */
+    function startMouseMode() {
+      $('boot').style.display = 'none';
+      state.mode = 'mouse';
+      $('mode-val').textContent = 'MOUSE';
+      $('manual').classList.add('on');
+      toast('MOUSE MODE — MOVE CURSOR / HOLD CLICK TO COLLAPSE / SCROLL = APERTURE');
+    }
+    addEventListener('mousemove', e => {
+      if (state.mode !== 'mouse' && !(state.mode === 'gesture' && !state.hasHand)) return;
+      state.tx = (e.clientX / innerWidth - 0.5) * 6.0;
+      state.ty = (0.5 - e.clientY / innerHeight) * 4.0 + 0.55;
+    });
+    addEventListener('mousedown', () => { if (state.mode === 'mouse') state.targetOpen = 0; });
+    addEventListener('mouseup', () => { if (state.mode === 'mouse') state.targetOpen = $('manual-slider').value / 100; });
+    addEventListener('wheel', e => {
+      if (state.mode !== 'mouse') return;
+      const s = $('manual-slider');
+      s.value = THREE.MathUtils.clamp(+s.value - Math.sign(e.deltaY) * 5, 0, 100);
+      state.targetOpen = s.value / 100;
+    });
+    $('manual-slider').addEventListener('input', e => state.targetOpen = e.target.value / 100);
 
-  /* smooth openness + spring the radius (gives it satisfying inertia) */
-  state.openness += (state.targetOpen - state.openness) * Math.min(1, dt*10);
-  // normal breathing range, plus an accelerating "engulf" term near full openness
-  // that pushes the shell out past the camera so the particles surround the viewer
-  const engulf = Math.pow(Math.max(0, (state.openness - 0.78) / 0.22), 2) * 11.0;
-  const targetRadius = 0.9 + state.openness * 2.6 + engulf;
-  const spring = (targetRadius - state.radius) * 40;
-  state.radiusVel = (state.radiusVel + spring*dt) * Math.exp(-5.5*dt);
-  state.radius += state.radiusVel*dt;
-  sphereUniforms.uRadius.value = state.radius;
-  sphereUniforms.uChaos.value  = 1 - state.openness;
-  sphereUniforms.uPulse.value  = Math.abs(state.radiusVel) * 0.25;
+    $('btn-start').addEventListener('click', startTracking);
+    $('btn-mouse').addEventListener('click', startMouseMode);
 
-  /* pop feedback on fast open/close */
-  if(Math.abs(state.targetOpen - prevOpen) > 0.45 && !reduceMotion){
-    stage.classList.remove('glitch'); void stage.offsetWidth; stage.classList.add('glitch');
-  }
-  prevOpen += (state.targetOpen - prevOpen)*Math.min(1, dt*4);
+    /* ============================================================
+       4. MAIN LOOP
+       ============================================================ */
+    const clock = new THREE.Clock();
+    let frames = 0, fpsTimer = 0, glitchTimer = 2 + Math.random() * 5, prevOpen = 0.55;
+    let naturalYAngle = 0;
+    const _zQ = new THREE.Quaternion(), _naturalYQ = new THREE.Quaternion();
+    const _zAxis = new THREE.Vector3(0, 0, 1), _yAxis = new THREE.Vector3(0, 1, 0);
+    const _prevSpherePos = new THREE.Vector3(), _prevSphereQ = new THREE.Quaternion(), _actualDQ = new THREE.Quaternion();
 
-  /* position follows hand, gentle lag */
-  sphere.position.x += (state.tx - sphere.position.x) * Math.min(1, dt*6);
-  sphere.position.y += (state.ty - sphere.position.y) * Math.min(1, dt*6);
+    function animate() {
+      requestAnimationFrame(animate);
+      const dt = Math.min(clock.getDelta(), 0.05);
+      const t = clock.elapsedTime;
+      _prevSpherePos.copy(sphere.position);
+      _prevSphereQ.copy(sphere.quaternion);
+      sphereUniforms.uTime.value = t;
 
-  /* rotation: the baseline spin runs unconditionally, and the hand contributes
-     VELOCITY on top of it — never an absolute goal to chase. A still hand adds
-     exactly zero (no fighting, no stutter); stopping or losing the hand lets
-     the extra spin ease out over ~0.3s instead of snapping. */
-  const idleRate = 0.22 * (reduceMotion ? 0.4 : 1);              // rad/s baseline
-  sphere.quaternion.premultiply(_idleQ.setFromAxisAngle(_yAxis, idleRate*dt));
-  state.handVel.multiplyScalar(Math.exp(-3.5*dt));               // gentle ease-out
-  const w = Math.min(state.handVel.length(), MAX_ROT_SPEED);
-  if(w > 1e-4){
-    _wAxis.copy(state.handVel).normalize();
-    sphere.quaternion.premultiply(_spinQ.setFromAxisAngle(_wAxis, w*dt));
-  }
-  sphere.quaternion.normalize();
-  ringA.rotation.y += dt*0.9;  ringB.rotation.y -= dt*1.3;
-  const softR = Math.sqrt(Math.max(state.radius, 0.01)) * 1.9; // dampened curve for secondary elements
-  const ringScale = softR;
-  ringA.scale.setScalar(ringScale); ringB.scale.setScalar(ringScale*0.92);
-  ringA.material.uniforms.uOp.value = ringB.material.uniforms.uOp.value = 0.25 + state.openness*0.75;
-  halo.scale.setScalar(4 + softR*2.2);
-  halo.material.opacity = 0.55 + state.openness*0.35;
+      /* smooth openness + spring the radius (gives it satisfying inertia) */
+      state.openness += (state.targetOpen - state.openness) * Math.min(1, dt * 10);
+      // normal breathing range, plus an accelerating "engulf" term near full openness
+      // that pushes the shell out past the camera so the particles surround the viewer
+      const engulf = Math.pow(Math.max(0, (state.openness - 0.78) / 0.22), 2) * 11.0;
+      const targetRadius = 0.9 + state.openness * 2.6 + engulf;
+      const spring = (targetRadius - state.radius) * 40;
+      state.radiusVel = (state.radiusVel + spring * dt) * Math.exp(-5.5 * dt);
+      state.radius += state.radiusVel * dt;
+      sphereUniforms.uRadius.value = state.radius;
+      sphereUniforms.uChaos.value = 1 - state.openness;
+      sphereUniforms.uPulse.value = Math.abs(state.radiusVel) * 0.25;
 
-  /* beam follows sphere base, stretches to reach it */
-  const topY = sphere.position.y - softR*0.4;
-  const h = Math.max(0.8, topY - EMITTER_Y);
-  beam.scale.set(softR*0.55 + 0.35, h/3.2, softR*0.55 + 0.35);
-  beam.position.set(sphere.position.x*0.9, EMITTER_Y + h/2, 0);
-  beamMat.uniforms.uStrength.value = 0.5 + state.openness*0.8;
-  emitterGlow.position.x = sphere.position.x*0.9;
-  emitterGlow.scale.set(1.6 + softR, 0.45 + softR*0.2, 1);
-  gridHelper.rotation.y = t*0.08;
+      /* pop feedback on fast open/close */
+      if (Math.abs(state.targetOpen - prevOpen) > 0.45 && !reduceMotion) {
+        stage.classList.remove('glitch'); void stage.offsetWidth; stage.classList.add('glitch');
+      }
+      prevOpen += (state.targetOpen - prevOpen) * Math.min(1, dt * 4);
 
-  /* random hologram glitch */
-  glitchTimer -= dt;
-  if(glitchTimer < 0 && !reduceMotion){
-    glitchTimer = 3 + Math.random()*6;
-    stage.classList.remove('glitch'); void stage.offsetWidth; stage.classList.add('glitch');
-  }
+      /* position follows hand, gentle lag */
+      sphere.position.x += (state.tx - sphere.position.x) * Math.min(1, dt * 6);
+      sphere.position.y += (state.ty - sphere.position.y) * Math.min(1, dt * 6);
 
-  /* subtle camera parallax breathing */
-  camera.position.x = Math.sin(t*0.12)*0.35;
-  camera.position.y = 0.6 + Math.sin(t*0.2)*0.1;
-  camera.lookAt(0, 0.4, 0);
+      /* Hand direction controls world-space Z; natural Y spin stays independent. */
+      const naturalYSpeed = 0.22 * (reduceMotion ? 0.4 : 1);
+      naturalYAngle = (naturalYAngle + naturalYSpeed * dt) % (Math.PI * 2);
+      const zError = angleDelta(state.targetHandAngle, state.handAngle);
+      const zStep = zError * Math.min(1, dt * ORIENTATION_RESPONSE);
+      state.handAngle += zStep;
+      state.rotSpeed = Math.abs(zStep) / Math.max(dt, 1e-6);
+      _zQ.setFromAxisAngle(_zAxis, state.handAngle);
+      _naturalYQ.setFromAxisAngle(_yAxis, naturalYAngle);
+      sphere.quaternion.copy(_zQ).multiply(_naturalYQ).normalize();
+      _actualDQ.copy(_prevSphereQ).invert().premultiply(sphere.quaternion);
+      const actualAngle = 2 * Math.acos(THREE.MathUtils.clamp(Math.abs(_actualDQ.w), -1, 1));
+      state.motion.positionSpeed = sphere.position.distanceTo(_prevSpherePos) / Math.max(dt, 1e-6);
+      state.motion.zOrientationSpeed = state.rotSpeed;
+      state.motion.naturalYSpeed = naturalYSpeed;
+      state.motion.sphereRotationSpeed = actualAngle / Math.max(dt, 1e-6);
+      const softR = Math.sqrt(Math.max(state.radius, 0.01)) * 1.9; // dampened curve for secondary elements
+      const ringScale = softR;
+      ringA.scale.setScalar(ringScale); ringB.scale.setScalar(ringScale * 0.92);
+      ringA.material.uniforms.uOp.value = ringB.material.uniforms.uOp.value = 0.25 + state.openness * 0.75;
+      halo.scale.setScalar(4 + softR * 2.2);
+      halo.material.opacity = 0.55 + state.openness * 0.35;
 
-  /* HUD */
-  const pct = Math.round(state.openness*100);
-  $('ap-fill').style.width = pct + '%';
-  $('ap-val').textContent = state.mode==='standby' ? '—' : pct.toString().padStart(3,'0');
-  const _euler = new THREE.Euler().setFromQuaternion(sphere.quaternion, 'YXZ');
-  $('rot-val').textContent = (_euler.y % (Math.PI*2)).toFixed(2);
-  $('orient-val').textContent = (state.mode==='gesture' && state.hasHand) ? 'HAND+SPIN' : 'AUTO';
-  const tr = $('hud-tr');
-  if(state.mode==='gesture'){
-    tr.classList.toggle('locked', state.hasHand);
-    $('track-txt').textContent = state.hasHand ? 'HAND LOCK' : 'SEARCHING';
-  } else if(state.mode==='mouse'){
-    tr.classList.add('locked'); $('track-txt').textContent = 'MOUSE LINK';
-  }
-  frames++; fpsTimer += dt;
-  if(fpsTimer >= 0.75){ $('fps-txt').textContent = Math.round(frames/fpsTimer)+' FPS'; frames=0; fpsTimer=0; }
-  updateDebug(dt);
+      /* beam follows sphere base, stretches to reach it */
+      const topY = sphere.position.y - softR * 0.4;
+      const h = Math.max(0.8, topY - EMITTER_Y);
+      beam.scale.set(softR * 0.55 + 0.35, h / 3.2, softR * 0.55 + 0.35);
+      beam.position.set(sphere.position.x * 0.9, EMITTER_Y + h / 2, 0);
+      beamMat.uniforms.uStrength.value = 0.5 + state.openness * 0.8;
+      emitterGlow.position.x = sphere.position.x * 0.9;
+      emitterGlow.scale.set(1.6 + softR, 0.45 + softR * 0.2, 1);
+      gridHelper.rotation.y = t * 0.08;
 
-  renderer.render(scene, camera);
-}
-animate();
+      /* random hologram glitch */
+      glitchTimer -= dt;
+      if (glitchTimer < 0 && !reduceMotion) {
+        glitchTimer = 3 + Math.random() * 6;
+        stage.classList.remove('glitch'); void stage.offsetWidth; stage.classList.add('glitch');
+      }
 
-addEventListener('resize', ()=>{
-  camera.aspect = innerWidth/innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-});
-</script>
+      /* subtle camera parallax breathing */
+      camera.position.x = Math.sin(t * 0.12) * 0.35;
+      camera.position.y = 0.6 + Math.sin(t * 0.2) * 0.1;
+      camera.lookAt(0, 0.4, 0);
+
+      /* HUD */
+      const pct = Math.round(state.openness * 100);
+      $('ap-fill').style.width = pct + '%';
+      $('ap-val').textContent = state.mode === 'standby' ? '—' : pct.toString().padStart(3, '0');
+      const _euler = new THREE.Euler().setFromQuaternion(sphere.quaternion, 'YXZ');
+      $('rot-val').textContent = (_euler.z % (Math.PI * 2)).toFixed(2);
+      $('orient-val').textContent = (state.mode === 'gesture' && state.hasHand) ? 'HAND Z+Y' : 'AUTO Y';
+      const tr = $('hud-tr');
+      if (state.mode === 'gesture') {
+        tr.classList.toggle('locked', state.hasHand);
+        $('track-txt').textContent = state.hasHand ? 'HAND LOCK' : 'SEARCHING';
+      } else if (state.mode === 'mouse') {
+        tr.classList.add('locked'); $('track-txt').textContent = 'MOUSE LINK';
+      }
+      frames++; fpsTimer += dt;
+      if (fpsTimer >= 0.75) { $('fps-txt').textContent = Math.round(frames / fpsTimer) + ' FPS'; frames = 0; fpsTimer = 0; }
+      updateDebug(dt);
+
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    addEventListener('resize', () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+  </script>
 </body>
+
 </html>
