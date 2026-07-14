@@ -257,28 +257,41 @@ const sphereMat = new THREE.ShaderMaterial({
       vSeed = aSeed; vShell = aShell;
       vec3 d = aDir;
 
-      // per-particle swirl — violent when collapsed, calm when open
-      float sw = uChaos*uChaos * (1.2 + aSeed*1.8);
-      float a  = uTime * sw * (aSeed > .5 ? 1.0 : -1.0) + aSeed*6.2831;
-      float c = cos(a), s = sin(a);
+      // gentle coherent shimmer (no more violent per-particle swirl)
+      float aRot = uTime * uChaos * 0.35 + aSeed * 0.3 * uChaos;
+      float c = cos(aRot), s = sin(aRot);
       d = vec3(c*d.x - s*d.z, d.y, s*d.x + c*d.z);
 
       // breathing wobble + pulse wave travelling outward
       float wob  = sin(uTime*(1.5+aSeed*2.0) + aSeed*40.0) * 0.035;
       float wave = sin(d.y*6.0 - uTime*3.0) * 0.02 * (1.0-uChaos);
       float r = uRadius * aShell * (1.0 + wob + wave) * (1.0 + uPulse*0.12);
+      vec3 spherePos = d * r;
 
-      // collapsed state: pull everything toward a dense hot core
-      r = mix(r, 0.45 + aSeed*0.35, uChaos*uChaos*0.85);
+      // condensed form: a luminous gyroscopic torus orbiting a tight core
+      float k = smoothstep(0.45, 0.95, uChaos);
+      float u = atan(d.z, d.x) + uTime*0.5;                       // orbit angle
+      float v = asin(clamp(d.y,-1.0,1.0))*2.0 + aSeed*6.2831
+              + uTime*(0.7 + aSeed*0.5);                          // tube angle, flowing
+      float R0 = 0.78, r0 = 0.2;
+      vec3 torusPos = vec3((R0 + r0*cos(v))*cos(u),
+                           r0*sin(v)*1.2,
+                           (R0 + r0*cos(v))*sin(u));
+      // ~1 in 5 particles feed the bright inner core instead of the ring
+      float isCore = step(aSeed, 0.2);
+      vec3 corePos = d * (0.14 + aSeed*0.9);                      // core with breathing shell
+      corePos *= 1.0 + sin(uTime*2.2 + aSeed*6.2831)*0.06;
+      vec3 condensed = mix(torusPos, corePos, isCore);
 
-      vec3 pos = d * r;
+      vec3 pos = mix(spherePos, condensed, k);
       // slight vertical drift of loose motes
-      pos.y += sin(uTime*0.7 + aSeed*20.0) * 0.03;
+      pos.y += sin(uTime*0.7 + aSeed*20.0) * 0.03 * (1.0-k);
 
       vec4 mv = modelViewMatrix * vec4(pos, 1.0);
       gl_Position = projectionMatrix * mv;
 
       float base = (1.6 + aSeed*2.6) * (aShell > .9 ? 1.0 : 1.4);
+      base *= mix(1.0, 0.68, k);                                  // finer grain when condensed
       gl_PointSize = base * uPixel * (26.0 / -mv.z) * (1.0 + uPulse*0.5);
 
       // shade: rim brighter than face (fake fresnel via view-dot)
@@ -299,10 +312,13 @@ const sphereMat = new THREE.ShaderMaterial({
 
       // data flicker
       alpha *= 0.65 + 0.35*sin(uTime*(6.0+vSeed*14.0) + vSeed*80.0);
+      // prevent additive washout when condensed
+      float k = smoothstep(0.45, 0.95, uChaos);
+      alpha *= 1.0 - 0.4*k;
 
       vec3 col = mix(uColA, uColB, vSeed*0.55 + vShade*0.35);
       col += vec3(0.9,0.95,1.0) * pow(vShade, 3.0) * 0.6;   // rim sparkle
-      col = mix(col, vec3(1.0,0.85,0.9), uChaos*uChaos*0.35*vSeed); // hot core tint
+      col = mix(col, vec3(1.0,0.82,0.9), k*0.3*vSeed);      // hot condensed tint
 
       float fade = vShell > .9 ? 1.0 : 0.55;
       gl_FragColor = vec4(col, alpha * fade);
@@ -484,6 +500,23 @@ function handQuaternion(lm){
   return new THREE.Quaternion().setFromRotationMatrix(m);
 }
 
+/* quaternion hygiene: q and -q are the same rotation, but slerping toward the
+   wrong sign takes the LONG way around — that was the runaway-spin bug. */
+function hemisphere(q, ref){ if(q.dot(ref) < 0){ q.x*=-1; q.y*=-1; q.z*=-1; q.w*=-1; } return q; }
+function quatAngle(a, b){ return 2 * Math.acos(Math.min(1, Math.abs(a.dot(b)))); }
+
+let quatInit = false, rejectCount = 0;
+function feedHandOrientation(lm){
+  const raw = handQuaternion(lm);
+  if(!quatInit){ state.targetQuat.copy(raw); quatInit = true; return; }
+  hemisphere(raw, state.targetQuat);
+  // reject single-frame tracking flips (palm normal inverting from z-noise);
+  // if the "flip" persists it's a real pose — accept after a few frames
+  if(quatAngle(raw, state.targetQuat) > 1.2 && rejectCount < 6){ rejectCount++; return; }
+  rejectCount = 0;
+  state.targetQuat.slerp(raw, 0.45);   // temporal smoothing of the raw signal
+}
+
 /* ----- landmark preview drawing ----- */
 const CONN = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],
   [9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
@@ -528,8 +561,8 @@ async function startTracking(){
         const cy = (lm[0].y + lm[5].y + lm[9].y + lm[13].y + lm[17].y)/5;
         state.tx = (0.5 - cx) * -6.0;          // mirror: hand right → sphere right
         state.ty = (0.5 - cy) *  4.0 + 0.55;
-        // full hand rotation → sphere orientation (only applied while a hand is seen)
-        state.targetQuat = handQuaternion(lm);
+        // full hand rotation → sphere orientation (filtered against flips/noise)
+        feedHandOrientation(lm);
         state.lastPalmX = cx;
         drawHand(lm);
       } else drawHand(null);
@@ -581,6 +614,9 @@ $('btn-mouse').addEventListener('click', startMouseMode);
    ============================================================ */
 const clock = new THREE.Clock();
 let frames = 0, fpsTimer = 0, glitchTimer = 2 + Math.random()*5, prevOpen = 0.55;
+const MAX_ROT_SPEED = 3.2;   // rad/s hard cap on sphere angular velocity
+const _goalQ = new THREE.Quaternion(), _idleQ = new THREE.Quaternion();
+const _yAxis = new THREE.Vector3(0,1,0);
 
 function animate(){
   requestAnimationFrame(animate);
@@ -611,15 +647,21 @@ function animate(){
   sphere.position.x += (state.tx - sphere.position.x) * Math.min(1, dt*6);
   sphere.position.y += (state.ty - sphere.position.y) * Math.min(1, dt*6);
 
-  /* rotation: directly track hand orientation while it's "held", otherwise self-rotate */
+  /* rotation: exactly track hand orientation while it's "held", otherwise self-rotate */
   const beingHeld = state.mode === 'gesture' && state.hasHand;
   if(beingHeld){
-    sphere.quaternion.slerp(state.targetQuat, Math.min(1, dt*9));
+    const goal = _goalQ.copy(state.targetQuat);
+    hemisphere(goal, sphere.quaternion);              // always take the short way
+    const ang = quatAngle(goal, sphere.quaternion);
+    if(ang > 1e-4){
+      // tight tracking, but never faster than MAX_ROT_SPEED — kills runaway spin
+      const step = Math.min(Math.min(1, dt*14), (MAX_ROT_SPEED*dt)/ang);
+      sphere.quaternion.slerp(goal, step);
+    }
   } else {
-    state.velRot *= Math.exp(-1.2*dt);
-    const idleSpeed = (0.22 + state.velRot) * dt * (reduceMotion ? 0.4 : 1);
-    const idleQ = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0), idleSpeed);
-    sphere.quaternion.premultiply(idleQ);
+    quatInit = false;                                  // re-sync cleanly on next hand lock
+    const idleSpeed = 0.22 * dt * (reduceMotion ? 0.4 : 1);
+    sphere.quaternion.premultiply(_idleQ.setFromAxisAngle(_yAxis, idleSpeed));
   }
   ringA.rotation.y += dt*0.9;  ringB.rotation.y -= dt*1.3;
   const softR = Math.sqrt(Math.max(state.radius, 0.01)) * 1.9; // dampened curve for secondary elements
