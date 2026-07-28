@@ -703,16 +703,17 @@
     uniform vec3 uOmega, uLinVel;
     varying float vSeed, vShade, vShell, vCond, vEcho;
 
-    // Smooth structural path only — no wobble / wave / pulse / drift / vibrato.
-    // Ghost trails use this for velocity so they track the orbit, not the shiver.
-    vec3 basePos(float t){
+    // Full particle path at time t — orbit, waves, breathing, vibrato, etc.
+    vec3 particlePos(float t){
       vec3 d = aDir;
       float aRot = uChaosAngle + aSeed * 0.3 * uChaos;
       float c = cos(aRot), s = sin(aRot);
       d = vec3(c*d.x - s*d.z, d.y, s*d.x + c*d.z);
 
-      float r = uRadius * aShell * (1.0 + uPulse*0.12);
-      vec3 spherePos = d * r;
+      float wob  = sin(t*(1.5+aSeed*2.0) + aSeed*40.0) * 0.035;
+      float wave = sin(d.y*6.0 - t*3.0) * 0.02 * (1.0-uChaos);
+      float r = uRadius * aShell * (1.0 + wob + wave) * (1.0 + uPulse*0.12);
+      vec3 spherePos = d * r + vec3(0.0, sin(t*0.7 + aSeed*20.0) * 0.03, 0.0);
 
       float k = smoothstep(0.45, 0.95, uChaos);
       float h1 = fract(aSeed*17.131);
@@ -720,7 +721,7 @@
       float h3 = fract(aSeed*83.377);
       vec3 condensed;
       if(aSeed < 0.16){
-        condensed = d * (0.10 + h1*h1*0.30);
+        condensed = d * (0.10 + h1*h1*0.30) * (1.0 + sin(t*2.4 + h2*6.2831)*0.08);
       } else if(aSeed < 0.86){
         float band = floor((aSeed - 0.16) / 0.2334);
         float dir  = mix(1.0, -1.0, mod(band, 2.0));
@@ -736,61 +737,38 @@
           : vec3(ct*p.x - st*p.y, st*p.x + ct*p.y, p.z);
         condensed = p;
       } else {
-        condensed = d * (1.3 + h1*0.55);
+        condensed = d * (1.3 + h1*0.55) + vec3(0.0, sin(t*0.8 + h2*6.2831)*0.09, 0.0);
       }
 
-      return mix(spherePos, condensed, k);
-    }
-
-    // Oscillatory offset at time t (breathing, waves, vibrato, etc.)
-    vec3 vibrationAt(float t){
-      vec3 d = aDir;
-      float aRot = uChaosAngle + aSeed * 0.3 * uChaos;
-      float c = cos(aRot), s = sin(aRot);
-      d = vec3(c*d.x - s*d.z, d.y, s*d.x + c*d.z);
-
-      float wob  = sin(t*(1.5+aSeed*2.0) + aSeed*40.0) * 0.035;
-      float wave = sin(d.y*6.0 - t*3.0) * 0.02 * (1.0-uChaos);
-      float k = smoothstep(0.45, 0.95, uChaos);
-      float h2 = fract(aSeed*39.719);
-
-      vec3 vib;
-      if(aSeed < 0.16){
-        float h1 = fract(aSeed*17.131);
-        vib = d * (0.10 + h1*h1*0.30) * (sin(t*2.4 + h2*6.2831)*0.08);
-      } else if(aSeed >= 0.86){
-        vib = vec3(0.0, sin(t*0.8 + h2*6.2831)*0.09, 0.0);
-      } else {
-        vib = vec3(0.0);
-      }
-      vib = mix(
-        d * (uRadius * aShell * (wob + wave) * (1.0 + uPulse*0.12))
-          + vec3(0.0, sin(t*0.7 + aSeed*20.0) * 0.03, 0.0),
-        vib,
-        k
-      );
-
-      vib += aDir * sin(t*6.2831853*uVibratoFreq + aSeed*6.2831853) * uVibrato * 0.09;
-      return vib;
+      vec3 pos = mix(spherePos, condensed, k);
+      pos += aDir * sin(t*6.2831853*uVibratoFreq + aSeed*6.2831853) * uVibrato * 0.09;
+      return pos;
     }
 
     void main(){
       vSeed = aSeed; vShell = aShell;
-      vEcho = (uEchoTap < 0.5) ? 1.0 : uEcho * pow(0.55, uEchoTap - 1.0);
+      // Staggered unlock: each tap starts at (n-1)/N and fades in over a wide
+      // window so later clones ease in instead of popping when echo ramps fast
+      const float ECHO_TAPS = 6.0;
+      float tapStart = (uEchoTap - 1.0) / ECHO_TAPS;
+      float tapEnd = min(1.0, tapStart + max(1.0 / ECHO_TAPS, 0.28));
+      float echoLocal = (uEchoTap < 0.5) ? 1.0 : smoothstep(tapStart, tapEnd, uEcho);
+      // later taps peak slightly smaller / more translucent than earlier ones
+      float echoMaxOp = pow(0.72, max(uEchoTap - 1.0, 0.0));
+      vEcho = (uEchoTap < 0.5) ? 1.0 : echoLocal * echoMaxOp;
       vCond = aSeed < 0.16 ? 1.0 : (aSeed < 0.86 ? 0.85 : 0.3);
 
-      // trail from pre-vibration path; clones then share the original's vibration
-      vec3 pos = basePos(uTime);
+      // Place clones by stepping back along the particle's current velocity —
+      // local animation (waves/orbit) + sphere spin + hand translation
+      vec3 pos = particlePos(uTime);
       if(uEchoTap > 0.5){
         float dtSamp = 0.0166667;
         float echoDt = uEchoTap * uEchoDelay;
-        // velocity = local orbit path + sphere spin (natural Y + hand Z)
-        // hand translation is ignored — clones trail in the sphere's rotating frame
-        vec3 vel = (basePos(uTime + dtSamp) - pos) / dtSamp;
+        vec3 vel = (particlePos(uTime + dtSamp) - pos) / dtSamp;
         vel += cross(uOmega, pos);
+        vel += uLinVel;
         pos -= vel * echoDt;
       }
-      pos += vibrationAt(uTime);
 
       vec4 mv = modelViewMatrix * vec4(pos, 1.0);
       gl_Position = projectionMatrix * mv;
@@ -798,7 +776,9 @@
       float k = smoothstep(0.45, 0.95, uChaos);
       float base = (1.6 + aSeed*2.6) * (aShell > .9 ? 1.0 : 1.4);
       base *= mix(1.0, 0.68, k);
-      base *= (uEchoTap < 0.5) ? 1.0 : pow(0.68, uEchoTap);
+      // clones start small and grow; keep a floor so opacity carries the fade-in
+      float echoMaxSize = pow(0.82, uEchoTap);
+      base *= (uEchoTap < 0.5) ? 1.0 : mix(0.2, 1.0, echoLocal) * echoMaxSize;
       gl_PointSize = base * uPixel * (26.0 / -mv.z) * (1.0 + uPulse*0.5);
 
       vec3 nrm = normalize(mat3(modelViewMatrix) * aDir);
@@ -843,9 +823,10 @@
     sphere.position.y = 0.55;
     scene.add(sphere);
 
-    // up to 3 ghost clones — same geometry; each tap steps further back along
-    // the particle's current velocity by one delay interval
-    const ECHO_VISUAL_TAPS = 3;
+    // up to 6 ghost clones — same geometry; each tap steps further back along
+    // the particle's current velocity by one delay interval. Visibility / size /
+    // opacity ramp in sequence as uEcho rises (see echoLocal in the vertex shader).
+    const ECHO_VISUAL_TAPS = 6;
     const echoGhosts = [];
     for (let tap = 1; tap <= ECHO_VISUAL_TAPS; tap++) {
       const gMat = new THREE.ShaderMaterial({
@@ -1356,8 +1337,11 @@
 
       sphereUniforms.uVibrato.value += (vibAmt - sphereUniforms.uVibrato.value) * Math.min(1, dt * 8);
       sphereUniforms.uEcho.value += (echoAmt - sphereUniforms.uEcho.value) * Math.min(1, dt * 8);
-      const echoOn = sphereUniforms.uEcho.value > 0.02;
-      for (let i = 0; i < echoGhosts.length; i++) echoGhosts[i].visible = echoOn;
+      // Reveal each ghost as soon as its fade window starts (shader owns the ramp)
+      const echoVal = sphereUniforms.uEcho.value;
+      for (let i = 0; i < echoGhosts.length; i++) {
+        echoGhosts[i].visible = echoVal > i / ECHO_VISUAL_TAPS;
+      }
 
       // pan follows left/right hand position
       audio.panner.pan.setTargetAtTime(THREE.MathUtils.clamp(state.tx / 3, -1, 1), now, RAMP);
@@ -1901,12 +1885,15 @@
       const actualAngle = 2 * Math.acos(THREE.MathUtils.clamp(Math.abs(_actualDQ.w), -1, 1));
       const frameDt = Math.max(dt, 1e-6);
 
-      // Echo trails: natural Y spin + hand Z rate only (no hand translation).
+      // Echo trails: natural Y spin + hand Z rate + hand translation (local space).
       const omega = sphereUniforms.uOmega.value;
       omega.copy(_yAxis).applyQuaternion(_zQ).multiplyScalar(naturalYSpeed); // natural spin
       omega.addScaledVector(_zAxis, state.rotVel);                         // hand twist
-      omega.applyQuaternion(_echoInvQ.copy(sphere.quaternion).invert());
-      sphereUniforms.uLinVel.value.set(0, 0, 0);
+      _echoInvQ.copy(sphere.quaternion).invert();
+      omega.applyQuaternion(_echoInvQ);
+      const lin = sphereUniforms.uLinVel.value;
+      lin.copy(sphere.position).sub(_prevSpherePos).divideScalar(frameDt);
+      lin.applyQuaternion(_echoInvQ);
 
       state.motion.positionSpeed = sphere.position.distanceTo(_prevSpherePos) / frameDt;
       state.motion.zOrientationSpeed = state.rotSpeed;
