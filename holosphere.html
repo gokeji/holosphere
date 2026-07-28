@@ -965,7 +965,7 @@
       enabled: false, ctx: null, prevOpenness: 0.55, plucking: 0,
       nextStep: 0, step: 0,
       prevTx: 0, prevTy: 0, motion: 0, motionRight: 0,
-      tremTest: false, tremHz: 0, tremDepthAmt: 0, tremPhase: 0,
+      tremTest: false, tremHz: 0, tremBpm: 0, tremDepthAmt: 0, tremPhase: 0,
     };
     const SCALE_SEMITONES = [0, 3, 5, 7, 10, 12, 15, 17, 19, 22]; // pentatonic minor, ~2 octaves
     const BASE_FREQ = 98; // G2 — sits under the visual without booming
@@ -974,13 +974,35 @@
     // 16-step patterns; numbers are velocities, null = rest. Bass values are
     // semitone offsets from BASE_FREQ (G minor pentatonic).
     const PAT = {
-      kick:  [1, 0, 0, 0,  1, 0, 0, 0,  1, 0, 0, 0,  1, 0, 0, 0.6],
-      snare: [0, 0, 0, 0,  1, 0, 0, 0,  0, 0, 0.35, 0,  1, 0, 0, 0],
-      hat:   [0.5, 0, 0.9, 0,  0.5, 0, 0.9, 0.35,  0.5, 0, 0.9, 0,  0.5, 0.35, 0, 0],
-      ohat:  [0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 1, 0],
-      bass:  [0, null, null, 12,  0, null, 0, 10,  null, 0, null, 7,  3, null, 10, null],
+      kick: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.6],
+      snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0.35, 0, 1, 0, 0, 0],
+      hat: [0.5, 0, 0.9, 0, 0.5, 0, 0.9, 0.35, 0.5, 0, 0.9, 0, 0.5, 0.35, 0, 0],
+      ohat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+      bass: [0, null, null, 12, 0, null, 0, 10, null, 0, null, 7, 3, null, 10, null],
     };
     const VIBRATO_HZ = 5.5; // shared with sphereUniforms.uVibratoFreq so particles shiver in sync
+
+    /* ================================================================
+       FX TUNING — adjust these to reshape tremolo / echo / vibrato
+       ================================================================ */
+    const TILT_DEADZONE_DEG = 5;     // no tilt-driven FX inside ±this from finger-up
+
+    // Tremolo (CW / right tilt + rightward travel). Strength 0→1 maps to:
+    const TREM_BPM_MIN = 100;          // BPM at strength 0
+    const TREM_BPM_MAX = 400;        // BPM at strength 1
+    const TREM_DEPTH_MIN = 0.7;      // gain duck at strength just above 0 (0–1)
+    const TREM_DEPTH_MAX = 0.9;      // gain duck at strength 1
+
+    // Echo / delay (CCW / left tilt + hand travel)
+    const ECHO_DELAY_SEC = 0.3;      // delay time in seconds
+    const ECHO_WET_MAX = 0.85;       // wet send level at full echoAmt
+    const ECHO_FEEDBACK_MIN = 0.2;   // feedback at echoAmt 0
+    const ECHO_FEEDBACK_MAX = 0.7;   // feedback at echoAmt 1
+    const ECHO_MOTION_WEIGHT = 0.8;  // how much hand-travel speed feeds echoAmt
+
+    // Vibrato (CW / right tilt + hand travel)
+    const VIBRATO_CENTS_MAX = 180;   // detune depth in cents at full vibAmt
+    /* ================================================================ */
 
     function initAudio() {
       if (audio.ctx) return;
@@ -1001,9 +1023,11 @@
       // tone/EQ problem. This curve compresses anything approaching full
       // scale smoothly instead of slicing it.
       const limiter = ctx.createWaveShaper();
-      { const n = 4096, curve = new Float32Array(n);
+      {
+        const n = 4096, curve = new Float32Array(n);
         for (let i = 0; i < n; i++) { const x = (i / (n - 1)) * 2 - 1; curve[i] = Math.tanh(x * 1.4); }
-        limiter.curve = curve; limiter.oversample = '4x'; }
+        limiter.curve = curve; limiter.oversample = '4x';
+      }
       limiter.connect(ctx.destination);
 
       const master = ctx.createGain(); master.gain.value = 0.0001;
@@ -1013,8 +1037,8 @@
       panner.connect(master);
 
       // counter-clockwise-tilt echo send, in parallel with the dry signal
-      const delay = ctx.createDelay(1.0); delay.delayTime.value = 0.3;
-      const feedback = ctx.createGain(); feedback.gain.value = 0.35;
+      const delay = ctx.createDelay(1.0); delay.delayTime.value = ECHO_DELAY_SEC;
+      const feedback = ctx.createGain(); feedback.gain.value = ECHO_FEEDBACK_MIN;
       const echoWet = ctx.createGain(); echoWet.gain.value = 0;
       panner.connect(delay);
       delay.connect(feedback).connect(delay);
@@ -1195,12 +1219,12 @@
       // brightness of the bassline rises with openness
       audio.brightness.frequency.setTargetAtTime(300 + state.openness * 3200, now, RAMP);
 
-      // held tilt maps to effect depth, with a ±5° deadzone around finger-up
+      // held tilt maps to effect depth, with a deadzone around finger-up
       // so a nearly-upright hand turns every tilt effect fully off.
-      // Outside the deadzone the remaining swing (5°→70°) remaps to 0→1.
+      // Outside the deadzone the remaining swing remaps to 0→1.
       // negative handAngle = clockwise (fingertips toward user's right);
       // positive = counter-clockwise (toward user's left).
-      const TILT_DEAD_RAD = THREE.MathUtils.degToRad(5);
+      const TILT_DEAD_RAD = THREE.MathUtils.degToRad(TILT_DEADZONE_DEG);
       const tiltSpan = MAX_HAND_ANGLE - TILT_DEAD_RAD;
       const absAng = Math.abs(state.handAngle);
       const tiltMag = absAng <= TILT_DEAD_RAD
@@ -1231,17 +1255,18 @@
       // T key toggles a validation mode: tremolo pinned to full depth with
       // every other effect muted, so the pulse can be heard in isolation
       const tremAmt = audio.tremTest ? 1 : audio.motionRight;
-      const MAX_DEPTH = audio.tremTest ? 0.95 : 0.8;
       const rotDepth = cwAmt; // right tilt only — left tilt stays at 0
-      const depthAmt = Math.min(1, Math.max(tremAmt, rotDepth));
-      const depth = depthAmt * MAX_DEPTH;
-      // rate only climbs with right-tilt charge (or motion charge)
-      const rateAmt = Math.max(cwAmt, tremAmt);
-      const tremHz = depthAmt > 0.001 ? (2.5 + rateAmt * 5.5) : 0;
+      // Strength 0–1: 0 at the deadzone edge, 1 at the tilt cap
+      const strength = Math.min(1, Math.max(tremAmt, rotDepth));
+      const tremBpm = TREM_BPM_MIN + strength * (TREM_BPM_MAX - TREM_BPM_MIN);
+      const tremHz = tremBpm / 60;
+      const depth = strength > 0.001
+        ? (TREM_DEPTH_MIN + strength * (TREM_DEPTH_MAX - TREM_DEPTH_MIN))
+        : 0;
       // Script-driven unipolar LFO: gain sweeps [1-depth, 1]. Direct
       // setValueAtTime each frame — immune to AudioParam-summation bugs
       // that made oscillator-driven tremolo inaudible.
-      if (depth > 0.001) {
+      if (depth > 0.001 && tremHz > 0.001) {
         audio.tremPhase += tremHz * dt * Math.PI * 2;
         const uni = 0.5 + 0.5 * Math.sin(audio.tremPhase);
         audio.tremGain.gain.setValueAtTime(1 - depth * uni, now);
@@ -1249,23 +1274,27 @@
         audio.tremGain.gain.setValueAtTime(1, now);
       }
       audio.tremHz = tremHz;
+      audio.tremBpm = tremBpm;
       audio.tremDepthAmt = depth;
       // particles: same rate drives the shiver speed, so the visual wobble
       // audibly and visibly speed up together as rotation increases
-      sphereUniforms.uVibratoFreq.value += ((tremHz || 2.5) - sphereUniforms.uVibratoFreq.value) * Math.min(1, dt * 6);
+      sphereUniforms.uVibratoFreq.value += ((tremHz || VIBRATO_HZ) - sphereUniforms.uVibratoFreq.value) * Math.min(1, dt * 6);
 
       const vibAmt = audio.tremTest ? 0 : THREE.MathUtils.clamp(cwAmt + audio.motion, 0, 1);
-      const echoAmt = audio.tremTest ? 0 : THREE.MathUtils.clamp(ccwAmt + audio.motion * 0.8, 0, 1);
+      const echoAmt = audio.tremTest
+        ? 0
+        : THREE.MathUtils.clamp(ccwAmt + audio.motion * ECHO_MOTION_WEIGHT, 0, 1);
 
-      const vibratoCents = vibAmt * 180; // ~two semitones at full depth (doubled)
+      const vibratoCents = vibAmt * VIBRATO_CENTS_MAX;
       audio.vibratoDepth.gain.setTargetAtTime(vibratoCents, now, 0.08);
-      audio.echoWet.gain.setTargetAtTime(echoAmt * 0.85, now, RAMP);
-      audio.echoFeedback.gain.setTargetAtTime(0.2 + echoAmt * 0.5, now, RAMP);
+      audio.echoWet.gain.setTargetAtTime(echoAmt * ECHO_WET_MAX, now, RAMP);
+      audio.echoFeedback.gain.setTargetAtTime(
+        ECHO_FEEDBACK_MIN + echoAmt * (ECHO_FEEDBACK_MAX - ECHO_FEEDBACK_MIN), now, RAMP);
 
       // drive the particle shiver from tremolo in test mode (vibrato is muted
       // there), otherwise from vibrato — so the sphere always shows the
       // effect you're hearing
-      const shiverAmt = audio.tremTest ? depthAmt : vibAmt;
+      const shiverAmt = audio.tremTest ? strength : vibAmt;
       sphereUniforms.uVibrato.value += (shiverAmt - sphereUniforms.uVibrato.value) * Math.min(1, dt * 8);
 
       // pan follows left/right hand position
@@ -1307,7 +1336,7 @@
         clearInterval(audio.beatTimer);
         if (audio.master) audio.master.gain.setTargetAtTime(0.0001, audio.ctx.currentTime, 0.08);
         if (audio.tremGain) audio.tremGain.gain.setTargetAtTime(1, audio.ctx.currentTime, 0.08);
-        audio.tremHz = 0; audio.tremDepthAmt = 0;
+        audio.tremHz = 0; audio.tremBpm = 0; audio.tremDepthAmt = 0;
         sphereUniforms.uVibrato.value = 0;
         $('btn-sound').textContent = 'SOUND OFF';
         $('btn-sound').classList.add('ghost');
@@ -1560,7 +1589,7 @@
 
       const tremLabel = $('trem-label');
       if (audio.enabled) {
-        $('trem-hz-val').textContent = audio.tremHz.toFixed(1) + ' Hz';
+        $('trem-hz-val').textContent = Math.round(audio.tremBpm) + ' BPM';
         $('trem-depth-val').textContent = 'DEPTH ' + Math.round(audio.tremDepthAmt * 100) + '%';
         tremLabel.classList.toggle('test', audio.tremTest);
       } else {
@@ -1593,7 +1622,7 @@
         `per-finger [idx mid rng pnk]  ${p}\n` +
         `position ${sphere.position.x.toFixed(3)},${sphere.position.y.toFixed(3)} @ ${state.motion.positionSpeed.toFixed(3)}/s   Z orientation ${THREE.MathUtils.radToDeg(state.handAngle).toFixed(1)}° → ${THREE.MathUtils.radToDeg(state.targetHandAngle).toFixed(1)}°\n` +
         `Z follow ${state.motion.zOrientationSpeed.toFixed(3)} rad/s   natural Y ${state.motion.naturalYSpeed.toFixed(3)} rad/s   total ${state.motion.sphereRotationSpeed.toFixed(3)} rad/s\n` +
-        `audio  motion ${audio.motion.toFixed(3)}   tremR ${audio.motionRight.toFixed(3)}   trem ${audio.tremHz.toFixed(1)}Hz depth ${(audio.tremDepthAmt * 100).toFixed(0)}%${audio.tremTest ? '  [TEST]' : ''}`;
+        `audio  motion ${audio.motion.toFixed(3)}   tremR ${audio.motionRight.toFixed(3)}   trem ${Math.round(audio.tremBpm)}bpm depth ${(audio.tremDepthAmt * 100).toFixed(0)}%${audio.tremTest ? '  [TEST]' : ''}`;
       dbgLogTimer -= dt;
       if (dbgLogTimer <= 0) {
         dbgLogTimer = 0.5;
