@@ -200,6 +200,44 @@
       width: 230px
     }
 
+    #hud-motion {
+      bottom: 104px;
+      left: 26px;
+      width: 230px
+    }
+
+    #hud-motion .row {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 4px
+    }
+
+    #rot-bar {
+      margin-top: 6px;
+      height: 8px;
+      border: 1px solid rgba(75, 232, 255, .35);
+      position: relative;
+      overflow: hidden
+    }
+
+    #rot-center {
+      position: absolute;
+      left: 50%;
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      background: var(--cyan);
+      opacity: .6;
+      z-index: 2
+    }
+
+    #rot-fill {
+      position: absolute;
+      inset: 1px auto 1px auto;
+      background: linear-gradient(90deg, rgba(75, 232, 255, .25), var(--cyan));
+      box-shadow: 0 0 12px var(--cyan-dim);
+    }
+
     #ap-bar {
       margin-top: 6px;
       height: 8px;
@@ -217,12 +255,21 @@
       transition: width .08s linear
     }
 
-    #ap-ticks {
+    #ap-ticks,
+    #rot-ticks {
       display: flex;
       justify-content: space-between;
       font-size: 9px;
       opacity: .4;
       margin-top: 3px
+    }
+
+    #hud-motion .val.right {
+      float: right
+    }
+
+    #hud-motion .rot-label {
+      margin-top: 8px
     }
 
     #hud-br {
@@ -420,6 +467,15 @@
       letter-spacing: .15em
     }
 
+    #btn-sound {
+      position: fixed;
+      right: 26px;
+      z-index: 10;
+      padding: 7px 14px;
+      font-size: 10px;
+      letter-spacing: .2em;
+    }
+
     #toast {
       position: fixed;
       top: 70px;
@@ -484,6 +540,21 @@
   <div class="hud" id="hud-tr">
     <div class="val"><span id="track-dot"></span><span id="track-txt">NO SIGNAL</span></div>
     <div class="lbl" id="fps-txt">— FPS</div>
+  </div>
+
+  <button class="btn ghost" id="btn-sound" type="button">SOUND OFF</button>
+
+  <div class="hud" id="hud-motion">
+    <div class="row">
+      <span class="lbl">POS X <span id="pos-x-val" class="val">0.00</span></span>
+      <span class="lbl">POS Y <span id="pos-y-val" class="val">0.00</span></span>
+    </div>
+    <div class="lbl rot-label">ROTATION <span id="rot-deg-val" class="val right">0.0°</span></div>
+    <div id="rot-bar">
+      <div id="rot-center"></div>
+      <div id="rot-fill"></div>
+    </div>
+    <div id="rot-ticks"><span>-45°</span><span>0°</span><span>+45°</span></div>
   </div>
 
   <div class="hud" id="hud-bl">
@@ -589,6 +660,8 @@
       uRadius: { value: 1.4 },
       uChaos: { value: 0.6 },   // 1 = fist (swirling collapse), 0 = open
       uChaosAngle: { value: 0 }, // accumulated shimmer angle (uChaos integrated over time)
+      uVibrato: { value: 0 },     // 0-1 vibrato intensity, mirrors the audio LFO depth
+      uVibratoFreq: { value: 5.5 }, // Hz — must match VIBRATO_HZ in the audio engine
       uPulse: { value: 0 },
       uPixel: { value: Math.min(devicePixelRatio, 2) },
       uColA: { value: COL_CYAN },
@@ -602,7 +675,7 @@
     attribute vec3  aDir;
     attribute float aSeed;
     attribute float aShell;
-    uniform float uTime, uRadius, uChaos, uChaosAngle, uPulse, uPixel;
+    uniform float uTime, uRadius, uChaos, uChaosAngle, uVibrato, uVibratoFreq, uPulse, uPixel;
     varying float vSeed, vShade, vShell, vCond;
 
     void main(){
@@ -659,6 +732,10 @@
       vec3 pos = mix(spherePos, condensed, k);
       // slight vertical drift of loose motes
       pos.y += sin(uTime*0.7 + aSeed*20.0) * 0.03 * (1.0-k);
+
+      // radial jitter locked to the audio vibrato rate — particles visibly
+      // shiver in sync with the pitch wobble when rotation charges vibrato
+      pos += aDir * sin(uTime*6.2831853*uVibratoFreq + aSeed*6.2831853) * uVibrato * 0.09;
 
       vec4 mv = modelViewMatrix * vec4(pos, 1.0);
       gl_Position = projectionMatrix * mv;
@@ -845,11 +922,235 @@
       openVel: 0,
       handAngle: 0, targetHandAngle: 0, rawHandAngle: 0,
       hasOrientation: false,
-      rotSpeed: 0,
+      rotSpeed: 0, rotVel: 0,
       motion: { positionSpeed: 0, zOrientationSpeed: 0, naturalYSpeed: 0, sphereRotationSpeed: 0 },
     };
 
     const $ = id => document.getElementById(id);
+
+    /* ============================================================
+       3b. AUDIO ENGINE — gesture-driven instrument
+       Openness   → lead note (quantized scale) + filter brightness, and a
+                    highpass sweep on the pad/beat loop (closed = thinner)
+       Rotation   → held tilt angle (capped ±45°, middle finger up = 0°)
+                    maps directly to effect depth: clockwise = vibrato,
+                    counter-clockwise = feedback-delay (echo) send.
+       Position   → tx = stereo pan, ty = formant/color filter
+       ============================================================ */
+    const audio = {
+      enabled: false, ctx: null, prevOpenness: 0.55, plucking: 0,
+      nextKick: 0, nextHat: 0,
+    };
+    const SCALE_SEMITONES = [0, 3, 5, 7, 10, 12, 15, 17, 19, 22]; // pentatonic minor, ~2 octaves
+    const BASE_FREQ = 98; // G2 — sits under the visual without booming
+    const BEAT_SEC = 0.5; // 120 BPM quarter notes for the background loop
+    const VIBRATO_HZ = 5.5; // shared with sphereUniforms.uVibratoFreq so particles shiver in sync
+
+    function initAudio() {
+      if (audio.ctx) return;
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      audio.ctx = ctx;
+
+      const master = ctx.createGain(); master.gain.value = 0.0001;
+      master.connect(ctx.destination);
+
+      const panner = ctx.createStereoPanner();
+      panner.connect(master);
+
+      // counter-clockwise-tilt echo send, in parallel with the dry signal
+      const delay = ctx.createDelay(1.0); delay.delayTime.value = 0.3;
+      const feedback = ctx.createGain(); feedback.gain.value = 0.35;
+      const echoWet = ctx.createGain(); echoWet.gain.value = 0;
+      panner.connect(delay);
+      delay.connect(feedback).connect(delay);
+      delay.connect(echoWet).connect(master);
+
+      // formant/color filter — driven by hand height (ty)
+      const formant = ctx.createBiquadFilter();
+      formant.type = 'peaking'; formant.frequency.value = 1200; formant.Q.value = 0.9; formant.gain.value = 4;
+      formant.connect(panner);
+
+      // brightness filter — driven by openness
+      const brightness = ctx.createBiquadFilter();
+      brightness.type = 'lowpass'; brightness.frequency.value = 800; brightness.Q.value = 0.7;
+      brightness.connect(formant);
+
+      // two detuned voices for a bit of body (the lead "instrument")
+      const lead = ctx.createOscillator(); lead.type = 'sawtooth'; lead.frequency.value = BASE_FREQ;
+      const sub = ctx.createOscillator(); sub.type = 'triangle'; sub.frequency.value = BASE_FREQ / 2; sub.detune.value = -6;
+      const leadGain = ctx.createGain(); leadGain.gain.value = 0.55;
+      const subGain = ctx.createGain(); subGain.gain.value = 0.35;
+      lead.connect(leadGain).connect(brightness);
+      sub.connect(subGain).connect(brightness);
+
+      // vibrato LFO → lead/sub detune; depth follows clockwise hand tilt
+      const vibratoLFO = ctx.createOscillator(); vibratoLFO.type = 'sine'; vibratoLFO.frequency.value = VIBRATO_HZ;
+      sphereUniforms.uVibratoFreq.value = VIBRATO_HZ;
+      const vibratoDepth = ctx.createGain(); vibratoDepth.gain.value = 0;
+      vibratoLFO.connect(vibratoDepth);
+      vibratoDepth.connect(lead.detune);
+      vibratoDepth.connect(sub.detune);
+
+      lead.start(); sub.start(); vibratoLFO.start();
+
+      // background pad + beat loop, always running once sound is on — the
+      // hand's openness sweeps a highpass filter across the whole loop
+      // (closed fist = thin/high, open hand = full body).
+      const beatHP = ctx.createBiquadFilter(); beatHP.type = 'highpass'; beatHP.frequency.value = 20; beatHP.Q.value = 0.5;
+      beatHP.connect(panner);
+
+      const padGain = ctx.createGain(); padGain.gain.value = 0.1;
+      const padRoot = ctx.createOscillator(); padRoot.type = 'sine'; padRoot.frequency.value = BASE_FREQ / 2;
+      const padFifth = ctx.createOscillator(); padFifth.type = 'sine'; padFifth.frequency.value = (BASE_FREQ / 2) * 1.5;
+      padRoot.connect(padGain); padFifth.connect(padGain); padGain.connect(beatHP);
+      padRoot.start(); padFifth.start();
+
+      const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 0.2, ctx.sampleRate);
+      const noiseData = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < noiseData.length; i++) noiseData[i] = Math.random() * 2 - 1;
+
+      audio.master = master; audio.panner = panner;
+      audio.echoWet = echoWet; audio.echoFeedback = feedback;
+      audio.formant = formant; audio.brightness = brightness;
+      audio.lead = lead; audio.sub = sub;
+      audio.vibratoDepth = vibratoDepth;
+      audio.beatHP = beatHP; audio.noiseBuffer = noiseBuffer;
+    }
+
+    function noteFreqFromOpenness(o) {
+      const idx = Math.round(THREE.MathUtils.clamp(o, 0, 1) * (SCALE_SEMITONES.length - 1));
+      return BASE_FREQ * Math.pow(2, SCALE_SEMITONES[idx] / 12);
+    }
+
+    /* short plucked blip — fired on a fast open/close snap */
+    function firePluck(strength) {
+      const ctx = audio.ctx;
+      const osc = ctx.createOscillator(); osc.type = 'triangle';
+      osc.frequency.value = noteFreqFromOpenness(state.openness) * 2;
+      const g = ctx.createGain(); g.gain.value = 0;
+      osc.connect(g).connect(audio.panner);
+      const now = ctx.currentTime;
+      const peak = THREE.MathUtils.clamp(strength, 0, 1) * 0.5;
+      g.gain.setValueAtTime(0, now);
+      g.gain.linearRampToValueAtTime(peak, now + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, now + 0.35);
+      osc.start(now);
+      osc.stop(now + 0.4);
+    }
+
+    /* background loop hits — kick on the beat, hat on the offbeat */
+    function fireKick(time) {
+      const ctx = audio.ctx;
+      const osc = ctx.createOscillator(); osc.type = 'sine';
+      const g = ctx.createGain();
+      osc.connect(g).connect(audio.beatHP);
+      osc.frequency.setValueAtTime(150, time);
+      osc.frequency.exponentialRampToValueAtTime(45, time + 0.12);
+      g.gain.setValueAtTime(0.0001, time);
+      g.gain.linearRampToValueAtTime(0.55, time + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.0001, time + 0.28);
+      osc.start(time); osc.stop(time + 0.3);
+    }
+    function fireHat(time) {
+      const ctx = audio.ctx;
+      const src = ctx.createBufferSource(); src.buffer = audio.noiseBuffer;
+      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
+      const g = ctx.createGain();
+      src.connect(hp).connect(g).connect(audio.beatHP);
+      g.gain.setValueAtTime(0.0001, time);
+      g.gain.linearRampToValueAtTime(0.16, time + 0.003);
+      g.gain.exponentialRampToValueAtTime(0.0001, time + 0.06);
+      src.start(time); src.stop(time + 0.08);
+    }
+    function scheduleBeats() {
+      const now = audio.ctx.currentTime, lookahead = 0.12;
+      while (audio.nextKick < now + lookahead) { fireKick(audio.nextKick); audio.nextKick += BEAT_SEC; }
+      while (audio.nextHat < now + lookahead) { fireHat(audio.nextHat); audio.nextHat += BEAT_SEC / 2; }
+    }
+
+    function updateAudio(dt) {
+      if (!audio.enabled || !audio.ctx) return;
+      const ctx = audio.ctx;
+      const now = ctx.currentTime;
+      const RAMP = 0.06;
+
+      audio.master.gain.setTargetAtTime(0.22, now, RAMP);
+
+      const freq = noteFreqFromOpenness(state.openness);
+      audio.lead.frequency.setTargetAtTime(freq, now, 0.09);
+      audio.sub.frequency.setTargetAtTime(freq / 2, now, 0.09);
+
+      // brightness rises with openness
+      audio.brightness.frequency.setTargetAtTime(300 + state.openness * 3200, now, RAMP);
+
+      // held tilt maps straight to effect depth: negative handAngle is a
+      // clockwise tilt (fingertips toward the user's right) → vibrato;
+      // positive is counter-clockwise → echo. Full depth at the ±45° cap.
+      const tilt = state.handAngle / MAX_HAND_ANGLE; // -1 (CW) … +1 (CCW)
+      const cwAmt = THREE.MathUtils.clamp(-tilt, 0, 1);
+      const ccwAmt = THREE.MathUtils.clamp(tilt, 0, 1);
+
+      const vibratoCents = cwAmt * 90; // nearly a semitone at full tilt
+      audio.vibratoDepth.gain.setTargetAtTime(vibratoCents, now, 0.08);
+      audio.echoWet.gain.setTargetAtTime(ccwAmt * 0.85, now, RAMP);
+      audio.echoFeedback.gain.setTargetAtTime(0.2 + ccwAmt * 0.5, now, RAMP);
+
+      // drive the particle shiver from the same depth so it reads as one effect
+      sphereUniforms.uVibrato.value += (cwAmt - sphereUniforms.uVibrato.value) * Math.min(1, dt * 8);
+
+      // pan follows left/right hand position
+      audio.panner.pan.setTargetAtTime(THREE.MathUtils.clamp(state.tx / 3, -1, 1), now, RAMP);
+
+      // formant color follows hand height
+      audio.formant.frequency.setTargetAtTime(500 + THREE.MathUtils.clamp(state.ty, -1, 2) * 900, now, RAMP);
+
+      // grip sweeps a highpass filter across the always-on pad/beat loop —
+      // closed fist thins it out, open hand restores full body
+      audio.beatHP.frequency.setTargetAtTime(20 + (1 - state.openness) * 4000, now, RAMP);
+      scheduleBeats();
+
+      // fast open/close snap → percussive pluck
+      const delta = state.openness - audio.prevOpenness;
+      if (Math.abs(delta) > 0.12 && audio.plucking <= 0) {
+        firePluck(Math.abs(delta) * 2);
+        audio.plucking = 0.12;
+      }
+      audio.plucking = Math.max(0, audio.plucking - dt);
+      audio.prevOpenness = state.openness;
+    }
+
+    function toggleAudio() {
+      if (!audio.enabled) {
+        initAudio();
+        if (audio.ctx.state === 'suspended') audio.ctx.resume();
+        audio.nextKick = audio.nextHat = audio.ctx.currentTime + 0.05;
+        audio.enabled = true;
+        $('btn-sound').textContent = 'SOUND ON';
+        $('btn-sound').classList.remove('ghost');
+      } else {
+        audio.enabled = false;
+        if (audio.master) audio.master.gain.setTargetAtTime(0.0001, audio.ctx.currentTime, 0.08);
+        sphereUniforms.uVibrato.value = 0;
+        $('btn-sound').textContent = 'SOUND OFF';
+        $('btn-sound').classList.add('ghost');
+      }
+    }
+    $('btn-sound').addEventListener('click', toggleAudio);
+
+    /* keep the sound button pinned directly under the camera preview panel,
+       whether or not it's currently shown */
+    function positionSoundButton() {
+      const camWrap = $('cam-wrap');
+      // when visible, measure the "OPTICAL FEED 01" tag under the panel (not
+      // the panel box itself, which stops above the tag's own bottom edge)
+      const top = camWrap.classList.contains('on')
+        ? document.querySelector('#cam-wrap .tag').getBoundingClientRect().bottom
+        : 70;
+      $('btn-sound').style.top = (top + 16) + 'px';
+    }
+    addEventListener('resize', positionSoundButton);
+    positionSoundButton();
+
     const toast = (msg) => {
       const t = $('toast'); t.textContent = msg; t.classList.add('show');
       setTimeout(() => t.classList.remove('show'), 3800);
@@ -993,6 +1294,7 @@
     const POSITION_DEADZONE = 0.055; // scene units; ignores stationary-hand tremor
     const ORIENTATION_WINDOW = 7;
     const ORIENTATION_DEADZONE = THREE.MathUtils.degToRad(3);
+    const MAX_HAND_ANGLE = THREE.MathUtils.degToRad(45); // tilt cap either side of finger-up
     const ORIENTATION_RESPONSE = 7;
     function median3(a) {
       if (a.length < 3) return a[a.length - 1];
@@ -1035,9 +1337,11 @@
         sinSum += Math.sin(angle);
         cosSum += Math.cos(angle);
       }
-      const filtered = Math.atan2(sinSum, cosSum);
+      // cap the usable tilt range at ±45° from finger-up (12 o'clock) —
+      // atan2 already returns (-PI, PI], so a plain clamp is safe here
+      const limited = THREE.MathUtils.clamp(Math.atan2(sinSum, cosSum), -MAX_HAND_ANGLE, MAX_HAND_ANGLE);
       if (!state.hasOrientation) {
-        state.targetHandAngle = state.handAngle + angleDelta(filtered, state.handAngle);
+        state.targetHandAngle = limited;
         state.hasOrientation = true;
         return;
       }
@@ -1046,8 +1350,26 @@
       // widen the dead zone while the grip is actively changing.
       const gripGate = THREE.MathUtils.clamp(1 - state.openVel * 12, 0, 1);
       const deadzone = ORIENTATION_DEADZONE / Math.max(gripGate, 0.05);
-      const change = angleDelta(filtered, state.targetHandAngle);
-      if (Math.abs(change) > deadzone) state.targetHandAngle += change;
+      const change = angleDelta(limited, state.targetHandAngle);
+      if (Math.abs(change) > deadzone)
+        state.targetHandAngle = THREE.MathUtils.clamp(state.targetHandAngle + change, -MAX_HAND_ANGLE, MAX_HAND_ANGLE);
+    }
+
+    /* ----- bottom-left HUD: live hand X/Y and rotation bar ----- */
+    const ROT_BAR_MAX_DEG = 45;
+    function updateMotionHUD() {
+      $('pos-x-val').textContent = state.tx.toFixed(2);
+      $('pos-y-val').textContent = state.ty.toFixed(2);
+
+      // shown clockwise-positive: CW tilt reads +° and fills rightward,
+      // CCW tilt reads -° and fills leftward (handAngle itself is CCW-positive)
+      const deg = -THREE.MathUtils.radToDeg(state.handAngle);
+      $('rot-deg-val').textContent = (deg >= 0 ? '+' : '') + deg.toFixed(1) + '°';
+
+      const halfPct = THREE.MathUtils.clamp(Math.abs(deg) / ROT_BAR_MAX_DEG, 0, 1) * 50;
+      const fill = $('rot-fill');
+      fill.style.left = (deg >= 0 ? 50 : 50 - halfPct) + '%';
+      fill.style.width = halfPct + '%';
     }
 
     /* ----- debug readout (press D): raw metric for calibration ----- */
@@ -1184,6 +1506,7 @@
         });
         await cam.start();
         $('cam-wrap').classList.add('on');
+        positionSoundButton();
         state.mode = 'gesture';
         $('mode-val').textContent = 'GESTURE';
         toast('OPTICAL FEED ONLINE — SHOW YOUR HAND');
@@ -1269,8 +1592,9 @@
       naturalYAngle = (naturalYAngle + naturalYSpeed * dt) % (Math.PI * 2);
       const zError = angleDelta(state.targetHandAngle, state.handAngle);
       const zStep = zError * Math.min(1, dt * ORIENTATION_RESPONSE);
-      state.handAngle += zStep;
-      state.rotSpeed = Math.abs(zStep) / Math.max(dt, 1e-6);
+      state.handAngle = THREE.MathUtils.clamp(state.handAngle + zStep, -MAX_HAND_ANGLE, MAX_HAND_ANGLE);
+      state.rotVel = zStep / Math.max(dt, 1e-6); // signed: - clockwise, + counter-clockwise
+      state.rotSpeed = Math.abs(state.rotVel);
       _zQ.setFromAxisAngle(_zAxis, state.handAngle);
       _naturalYQ.setFromAxisAngle(_yAxis, naturalYAngle);
       sphere.quaternion.copy(_zQ).multiply(_naturalYQ).normalize();
@@ -1326,6 +1650,8 @@
       frames++; fpsTimer += dt;
       if (fpsTimer >= 0.75) { $('fps-txt').textContent = Math.round(frames / fpsTimer) + ' FPS'; frames = 0; fpsTimer = 0; }
       updateDebug(dt);
+      updateAudio(dt);
+      updateMotionHUD();
 
       renderer.render(scene, camera);
     }
