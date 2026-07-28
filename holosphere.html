@@ -511,10 +511,97 @@
       opacity: .9
     }
 
+    /* ---------- track rack — CD selector buttons ---------- */
+    #track-rack {
+      position: fixed;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 10;
+      display: flex;
+      gap: 18px;
+      align-items: flex-start;
+    }
+
+    .cd-btn {
+      pointer-events: auto;
+      cursor: pointer;
+      background: none;
+      border: none;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 6px;
+      font-family: inherit;
+      color: var(--cyan);
+      opacity: .5;
+      transition: opacity .25s;
+    }
+
+    .cd-btn:hover {
+      opacity: .85
+    }
+
+    .cd-btn.active {
+      opacity: 1
+    }
+
+    .cd {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      display: block;
+      background:
+        radial-gradient(circle at 50% 50%,
+          #010409 0 3.5px,
+          rgba(180, 235, 255, .85) 3.5px 4.5px,
+          rgba(6, 18, 30, .92) 4.5px 12px,
+          rgba(190, 240, 255, .28) 12px 13px,
+          transparent 13px),
+        conic-gradient(from 200deg,
+          hsla(var(--h), 95%, 72%, .14),
+          hsla(var(--h), 95%, 78%, .75),
+          hsla(calc(var(--h) + 45), 95%, 70%, .2),
+          hsla(var(--h), 95%, 80%, .6),
+          hsla(calc(var(--h) - 45), 95%, 70%, .25),
+          hsla(var(--h), 95%, 75%, .7),
+          hsla(var(--h), 95%, 72%, .14));
+      border: 1px solid hsla(var(--h), 90%, 75%, .5);
+      box-shadow: 0 0 10px hsla(var(--h), 90%, 65%, .22), inset 0 0 6px rgba(0, 0, 0, .6);
+    }
+
+    .cd-btn.active .cd {
+      animation: cdspin 3.5s linear infinite;
+      box-shadow: 0 0 18px hsla(var(--h), 95%, 70%, .6), inset 0 0 6px rgba(0, 0, 0, .6);
+    }
+
+    @keyframes cdspin {
+      to {
+        transform: rotate(360deg)
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .cd-btn.active .cd {
+        animation: none
+      }
+    }
+
+    .cd-name {
+      font-size: 8px;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+
+    .cd-btn.active .cd-name {
+      text-shadow: 0 0 8px var(--cyan-dim)
+    }
+
     /* ---------- debug readout (toggle with D) ---------- */
     #debug {
       position: fixed;
-      bottom: 26px;
+      bottom: 108px;
       left: 50%;
       transform: translateX(-50%);
       z-index: 11;
@@ -602,6 +689,8 @@
     <span>MANUAL APERTURE</span>
     <input type="range" id="manual-slider" min="0" max="100" value="55">
   </div>
+
+  <div id="track-rack"></div>
 
   <div id="toast"></div>
   <div id="debug"></div>
@@ -1018,19 +1107,89 @@
       prevTx: 0, prevTy: 0, motion: 0, motionRight: 0,
       tremTest: false, tremHz: 0, tremBpm: 0, tremDepthAmt: 0, tremPhase: 0,
     };
-    const SCALE_SEMITONES = [0, 3, 5, 7, 10, 12, 15, 17, 19, 22]; // pentatonic minor, ~2 octaves
-    const BASE_FREQ = 98; // G2 — sits under the visual without booming
-    const BEAT_SEC = 0.5; // 120 BPM quarter notes for the background loop
-    const STEP_SEC = BEAT_SEC / 4; // 16th-note sequencer grid
-    // 16-step patterns; numbers are velocities, null = rest. Bass values are
-    // semitone offsets from BASE_FREQ (G minor pentatonic).
-    const PAT = {
-      kick: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.6],
-      snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0.35, 0, 1, 0, 0, 0],
-      hat: [0.5, 0, 0.9, 0, 0.5, 0, 0.9, 0.35, 0.5, 0, 0.9, 0, 0.5, 0.35, 0, 0],
-      ohat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
-      bass: [0, null, null, 12, 0, null, 0, 10, null, 0, null, 7, 3, null, 10, null],
-    };
+    /* ---- track library ----
+       Each track is a full groove personality: 16-step patterns (numbers are
+       velocities, null = rest; bass values are semitone offsets from `base`),
+       plus tempo, scale (for the snap-pluck), oscillator waveforms, pad
+       interval/level, swing (fraction of a 16th to delay offbeats) and the
+       hue used to tint its CD button. */
+    const TRACKS = [
+      {
+        name: 'PULSE', hue: 190, bpm: 120, base: 98, // G2 — the original groove
+        scale: [0, 3, 5, 7, 10, 12, 15, 17, 19, 22], // pentatonic minor
+        lead: 'sawtooth', sub: 'triangle', pad: [0, 7], padGain: 0.08, swing: 0,
+        pat: {
+          kick: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0.6],
+          snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0.35, 0, 1, 0, 0, 0],
+          hat: [0.5, 0, 0.9, 0, 0.5, 0, 0.9, 0.35, 0.5, 0, 0.9, 0, 0.5, 0.35, 0, 0],
+          ohat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0],
+          bass: [0, null, null, 12, 0, null, 0, 10, null, 0, null, 7, 3, null, 10, null],
+        },
+      },
+      {
+        name: 'DRIFT', hue: 265, bpm: 84, base: 110, // A2 — weightless, dreamy
+        scale: [0, 2, 4, 7, 9, 12, 14, 16, 19, 21], // pentatonic major
+        lead: 'sine', sub: 'sine', pad: [0, 7], padGain: 0.17, swing: 0,
+        pat: {
+          kick: [1, 0, 0, 0, 0, 0, 0, 0, 0.6, 0, 0, 0, 0, 0, 0, 0],
+          snare: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.25, 0, 0, 0],
+          hat: [0, 0, 0.25, 0, 0, 0, 0.2, 0, 0, 0, 0.25, 0, 0, 0, 0.2, 0],
+          ohat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.5, 0],
+          bass: [0, null, null, null, 7, null, null, null, 4, null, null, null, 9, null, null, null],
+        },
+      },
+      {
+        name: 'VOLT', hue: 55, bpm: 140, base: 87, // F2 — aggressive acid drive
+        scale: [0, 3, 5, 6, 7, 10, 12, 15, 17, 19], // minor blues (with b5)
+        lead: 'square', sub: 'sawtooth', pad: [0, 12], padGain: 0.04, swing: 0,
+        pat: {
+          kick: [1, 0, 0, 0, 1, 0, 0, 0.5, 1, 0, 0, 0, 1, 0, 0.4, 0],
+          snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0.6],
+          hat: [0.6, 0.3, 0, 0.3, 0.6, 0.3, 0, 0.3, 0.6, 0.3, 0, 0.3, 0.6, 0.3, 0, 0.3],
+          ohat: [0, 0, 0.7, 0, 0, 0, 0.7, 0, 0, 0, 0.7, 0, 0, 0, 0.7, 0],
+          bass: [0, null, 12, 0, 3, null, 0, 10, 0, 12, null, 3, 15, null, 10, 12],
+        },
+      },
+      {
+        name: 'NOIR', hue: 330, bpm: 88, base: 82, // E2 — smoky, swung, late-night
+        scale: [0, 3, 5, 7, 10, 12, 14, 15, 19, 22], // minor with a jazzy 9th
+        lead: 'triangle', sub: 'sine', pad: [0, 10], padGain: 0.1, swing: 0.35,
+        pat: {
+          kick: [1, 0, 0, 0, 0, 0, 0.6, 0, 0, 0.5, 0, 0, 0, 0, 0, 0],
+          snare: [0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0.25],
+          hat: [0.5, 0, 0.35, 0, 0.5, 0, 0.35, 0, 0.5, 0, 0, 0.2, 0.5, 0, 0.35, 0],
+          ohat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.8, 0, 0, 0, 0, 0],
+          bass: [0, null, null, 10, null, null, 7, null, 3, null, null, null, 5, null, 3, null],
+        },
+      },
+      {
+        name: 'SOLAR', hue: 25, bpm: 124, base: 110, // A2 — sunny four-on-floor bounce
+        scale: [0, 2, 4, 7, 9, 12, 14, 16, 19, 21], // pentatonic major
+        lead: 'triangle', sub: 'triangle', pad: [0, 4], padGain: 0.1, swing: 0.12,
+        pat: {
+          kick: [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0],
+          snare: [0, 0, 0, 0, 0.7, 0, 0, 0, 0, 0, 0, 0, 0.7, 0, 0, 0],
+          hat: [0.4, 0, 0, 0.3, 0.4, 0, 0, 0.3, 0.4, 0, 0, 0.3, 0.4, 0, 0, 0.3],
+          ohat: [0, 0, 0.8, 0, 0, 0, 0.8, 0, 0, 0, 0.8, 0, 0, 0, 0.8, 0],
+          bass: [0, null, 12, null, 0, null, 9, null, 0, null, 12, null, 4, null, 7, null],
+        },
+      },
+      {
+        name: 'RITUAL', hue: 140, bpm: 102, base: 73, // D2 — dark tribal ceremony
+        scale: [0, 1, 3, 5, 7, 8, 10, 12, 13, 15], // phrygian
+        lead: 'sawtooth', sub: 'sine', pad: [0, 7], padGain: 0.13, swing: 0,
+        pat: {
+          kick: [1, 0, 0, 0.7, 0, 0, 1, 0, 0.8, 0, 0, 1, 0, 0.7, 0, 0],
+          snare: [0, 0, 0.35, 0, 1, 0, 0, 0.3, 0, 0.35, 0, 0, 1, 0, 0.4, 0],
+          hat: [0, 0, 0.3, 0, 0, 0.3, 0, 0, 0.3, 0, 0, 0.3, 0, 0, 0.3, 0],
+          ohat: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.6],
+          bass: [0, null, 0, null, null, 3, null, null, 0, null, 1, null, null, 3, null, 5],
+        },
+      },
+    ];
+    let trackIdx = 0;
+    const curTrack = () => TRACKS[trackIdx];
+    let stepSec = 60 / TRACKS[0].bpm / 4; // 16th-note sequencer grid
     const VIBRATO_HZ = 5.5; // shared with sphereUniforms.uVibratoFreq so particles shiver in sync
 
     /* ================================================================
@@ -1121,8 +1280,9 @@
       // two detuned voices form the bassline instrument — always-running
       // oscillators gated by a shared envelope that the step sequencer
       // retriggers, so the "single held pitch" becomes a driving riff
-      const lead = ctx.createOscillator(); lead.type = 'sawtooth'; lead.frequency.value = BASE_FREQ;
-      const sub = ctx.createOscillator(); sub.type = 'triangle'; sub.frequency.value = BASE_FREQ / 2; sub.detune.value = -6;
+      const tk = curTrack();
+      const lead = ctx.createOscillator(); lead.type = tk.lead; lead.frequency.value = tk.base;
+      const sub = ctx.createOscillator(); sub.type = tk.sub; sub.frequency.value = tk.base / 2; sub.detune.value = -6;
       const leadGain = ctx.createGain(); leadGain.gain.value = 0.55;
       const subGain = ctx.createGain(); subGain.gain.value = 0.35;
       const bassEnv = ctx.createGain(); bassEnv.gain.value = 0.0001;
@@ -1148,10 +1308,13 @@
       const tremGain = ctx.createGain(); tremGain.gain.value = 1;
       comp.connect(tremGain); tremGain.connect(limiter);
 
-      // background pad — a soft root+fifth bed under the groove
-      const padGain = ctx.createGain(); padGain.gain.value = 0.08;
-      const padRoot = ctx.createOscillator(); padRoot.type = 'sine'; padRoot.frequency.value = BASE_FREQ / 2;
-      const padFifth = ctx.createOscillator(); padFifth.type = 'sine'; padFifth.frequency.value = (BASE_FREQ / 2) * 1.5;
+      // background pad — a soft two-note bed under the groove; the interval
+      // and level come from the current track (fifth, third, octave, ...)
+      const padGain = ctx.createGain(); padGain.gain.value = tk.padGain;
+      const padRoot = ctx.createOscillator(); padRoot.type = 'sine';
+      padRoot.frequency.value = (tk.base / 2) * Math.pow(2, tk.pad[0] / 12);
+      const padFifth = ctx.createOscillator(); padFifth.type = 'sine';
+      padFifth.frequency.value = (tk.base / 2) * Math.pow(2, tk.pad[1] / 12);
       padRoot.connect(padGain); padFifth.connect(padGain); padGain.connect(gripLP);
       padRoot.start(); padFifth.start();
 
@@ -1166,11 +1329,13 @@
       audio.vibratoDepth = vibratoDepth;
       audio.tremGain = tremGain;
       audio.gripLP = gripLP; audio.noiseBuffer = noiseBuffer;
+      audio.padRoot = padRoot; audio.padFifth = padFifth; audio.padGain = padGain;
     }
 
     function noteFreqFromOpenness(o) {
-      const idx = Math.round(THREE.MathUtils.clamp(o, 0, 1) * (SCALE_SEMITONES.length - 1));
-      return BASE_FREQ * Math.pow(2, SCALE_SEMITONES[idx] / 12);
+      const tk = curTrack();
+      const idx = Math.round(THREE.MathUtils.clamp(o, 0, 1) * (tk.scale.length - 1));
+      return tk.base * Math.pow(2, tk.scale[idx] / 12);
     }
 
     /* short plucked blip — fired on a fast open/close snap */
@@ -1235,7 +1400,7 @@
       src.start(time); src.stop(time + decay + 0.05);
     }
     function fireBass(time, semi) {
-      const f = BASE_FREQ * Math.pow(2, semi / 12);
+      const f = curTrack().base * Math.pow(2, semi / 12);
       audio.lead.frequency.setValueAtTime(f, time);
       audio.sub.frequency.setValueAtTime(f / 2, time);
       const g = audio.bassEnv.gain;
@@ -1244,7 +1409,7 @@
       if (g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(time);
       else { g.cancelScheduledValues(time); g.setValueAtTime(0.0001, time); }
       g.linearRampToValueAtTime(1, time + 0.015);
-      g.setTargetAtTime(0.0001, time + 0.015, STEP_SEC * 0.55);
+      g.setTargetAtTime(0.0001, time + 0.015, stepSec * 0.55);
     }
     function scheduleBeats() {
       if (!audio.enabled) return;
@@ -1253,14 +1418,16 @@
       // or drop entirely — that was the choppiness
       const now = audio.ctx.currentTime, lookahead = 0.35;
       while (audio.nextStep < now + lookahead) {
-        const t = audio.nextStep, s = audio.step % 16;
-        if (PAT.kick[s]) fireKick(t, PAT.kick[s]);
-        if (PAT.snare[s]) fireSnare(t, PAT.snare[s]);
-        if (PAT.hat[s]) fireHat(t, PAT.hat[s], false);
-        if (PAT.ohat[s]) fireHat(t, PAT.ohat[s], true);
-        if (PAT.bass[s] !== null) fireBass(t, PAT.bass[s]);
+        const pat = curTrack().pat, s = audio.step % 16;
+        // swing: offbeat 16ths land late by a fraction of a step
+        const t = audio.nextStep + ((s % 2) ? curTrack().swing * stepSec : 0);
+        if (pat.kick[s]) fireKick(t, pat.kick[s]);
+        if (pat.snare[s]) fireSnare(t, pat.snare[s]);
+        if (pat.hat[s]) fireHat(t, pat.hat[s], false);
+        if (pat.ohat[s]) fireHat(t, pat.ohat[s], true);
+        if (pat.bass[s] !== null) fireBass(t, pat.bass[s]);
         audio.step++;
-        audio.nextStep += STEP_SEC;
+        audio.nextStep += stepSec;
       }
     }
 
@@ -1411,6 +1578,40 @@
       }
     }
     $('btn-sound').addEventListener('click', toggleAudio);
+
+    /* ----- track selection (CD rack) ----- */
+    function selectTrack(i) {
+      trackIdx = i;
+      const tk = curTrack();
+      stepSec = 60 / tk.bpm / 4;
+      // retune the live audio graph; the sequencer picks up the new patterns
+      // and tempo on the very next scheduled step, so the groove morphs
+      // without stopping
+      if (audio.ctx) {
+        const now = audio.ctx.currentTime;
+        audio.lead.type = tk.lead;
+        audio.sub.type = tk.sub;
+        audio.padRoot.frequency.setTargetAtTime((tk.base / 2) * Math.pow(2, tk.pad[0] / 12), now, 0.2);
+        audio.padFifth.frequency.setTargetAtTime((tk.base / 2) * Math.pow(2, tk.pad[1] / 12), now, 0.2);
+        audio.padGain.gain.setTargetAtTime(tk.padGain, now, 0.3);
+      }
+      const btns = document.querySelectorAll('#track-rack .cd-btn');
+      btns.forEach((b, j) => b.classList.toggle('active', j === i));
+      toast(`TRACK ${i + 1} — ${tk.name} // ${tk.bpm} BPM`);
+    }
+    {
+      const rack = $('track-rack');
+      TRACKS.forEach((tk, i) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'cd-btn' + (i === trackIdx ? ' active' : '');
+        b.style.setProperty('--h', tk.hue);
+        b.title = `${tk.name} — ${tk.bpm} BPM`;
+        b.innerHTML = `<span class="cd"></span><span class="cd-name">${tk.name}</span>`;
+        b.addEventListener('click', () => selectTrack(i));
+        rack.appendChild(b);
+      });
+    }
 
     /* keep the sound button pinned directly under the camera preview panel,
        whether or not it's currently shown */
