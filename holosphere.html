@@ -684,8 +684,9 @@
       uVibrato: { value: 0 },     // 0-1 vibrato intensity, mirrors the audio LFO depth
       uVibratoFreq: { value: 5.5 }, // Hz — must match VIBRATO_HZ in the audio engine
       uEcho: { value: 0 },        // 0-1 echo intensity — drives ghost trail visibility
-      uEchoDelay: { value: 0.3 }, // seconds between ghost taps (mirrors audio delay time)
+      uEchoDelay: { value: 0.2 },  // seconds between visual ghost taps (trail spacing)
       uEchoTap: { value: 0 },     // 0 = live particle; 1+ = delayed ghost copies
+      uEchoTaps: { value: 12 },   // total clones at full strength (matches ECHO_VISUAL_TAPS)
       uPulse: { value: 0 },
       uPixel: { value: Math.min(devicePixelRatio, 2) },
       uColA: { value: COL_CYAN },
@@ -697,7 +698,7 @@
     attribute float aSeed;
     attribute float aShell;
     uniform float uTime, uRadius, uChaos, uChaosAngle, uVibrato, uVibratoFreq;
-    uniform float uEcho, uEchoDelay, uEchoTap, uPulse, uPixel;
+    uniform float uEcho, uEchoDelay, uEchoTap, uEchoTaps, uPulse, uPixel;
     varying float vSeed, vShade, vShell, vCond, vEcho;
 
     // Full particle path at time t — orbit, waves, breathing, vibrato, etc.
@@ -746,12 +747,12 @@
       vSeed = aSeed; vShell = aShell;
       // Staggered unlock: each tap starts at (n-1)/N and fades in over a wide
       // window so later clones ease in instead of popping when echo ramps fast
-      const float ECHO_TAPS = 6.0;
-      float tapStart = (uEchoTap - 1.0) / ECHO_TAPS;
-      float tapEnd = min(1.0, tapStart + max(1.0 / ECHO_TAPS, 0.28));
+      float tapStart = (uEchoTap - 1.0) / uEchoTaps;
+      float tapEnd = min(1.0, tapStart + max(1.0 / uEchoTaps, 0.28));
       float echoLocal = (uEchoTap < 0.5) ? 1.0 : smoothstep(tapStart, tapEnd, uEcho);
       // later taps peak slightly smaller / more translucent than earlier ones
-      float echoMaxOp = pow(0.72, max(uEchoTap - 1.0, 0.0));
+      float tapFrac = (uEchoTap - 1.0) / max(uEchoTaps - 1.0, 1.0);
+      float echoMaxOp = mix(1.0, 0.28, tapFrac);
       vEcho = (uEchoTap < 0.5) ? 1.0 : echoLocal * echoMaxOp;
       vCond = aSeed < 0.16 ? 1.0 : (aSeed < 0.86 ? 0.85 : 0.3);
 
@@ -774,7 +775,7 @@
       float base = (1.6 + aSeed*2.6) * (aShell > .9 ? 1.0 : 1.4);
       base *= mix(1.0, 0.68, k);
       // clones start small and grow; keep a floor so opacity carries the fade-in
-      float echoMaxSize = pow(0.82, uEchoTap);
+      float echoMaxSize = mix(0.92, 0.38, tapFrac);
       base *= (uEchoTap < 0.5) ? 1.0 : mix(0.2, 1.0, echoLocal) * echoMaxSize;
       gl_PointSize = base * uPixel * (26.0 / -mv.z) * (1.0 + uPulse*0.5);
 
@@ -820,10 +821,11 @@
     sphere.position.y = 0.55;
     scene.add(sphere);
 
-    // up to 6 ghost clones — same geometry; each tap steps further back along
-    // the particle's current velocity by one delay interval. Visibility / size /
-    // opacity ramp in sequence as uEcho rises (see echoLocal in the vertex shader).
-    const ECHO_VISUAL_TAPS = 6;
+    // Visual delay trail — tweak these to change intensity / length
+    const ECHO_VISUAL_TAPS = 12;         // clones at full delay strength
+    const ECHO_TRAIL_SPACING_SEC = 0.2;  // time gap between consecutive clones
+    sphereUniforms.uEchoTaps.value = ECHO_VISUAL_TAPS;
+    sphereUniforms.uEchoDelay.value = ECHO_TRAIL_SPACING_SEC;
     const echoGhosts = [];
     for (let tap = 1; tap <= ECHO_VISUAL_TAPS; tap++) {
       const gMat = new THREE.ShaderMaterial({
@@ -1028,12 +1030,11 @@
     const TREM_DEPTH_MAX = 0.9;      // gain duck at strength 1
 
     // Echo / delay (CCW / left tilt + hand travel)
-    const ECHO_DELAY_SEC = 0.3;      // delay time in seconds
+    const ECHO_DELAY_SEC = 0.3;      // audio delay time in seconds
     const ECHO_WET_MAX = 0.85;       // wet send level at full echoAmt
     const ECHO_FEEDBACK_MIN = 0.2;   // feedback at echoAmt 0
     const ECHO_FEEDBACK_MAX = 0.7;   // feedback at echoAmt 1
     const ECHO_MOTION_WEIGHT = 0.8;  // how much hand-travel speed feeds echoAmt
-    sphereUniforms.uEchoDelay.value = ECHO_DELAY_SEC;
 
     // Vibrato (CW / right tilt + hand travel)
     const VIBRATO_CENTS_MAX = 180;   // detune depth in cents at full vibAmt
