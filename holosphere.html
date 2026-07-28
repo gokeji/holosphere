@@ -683,126 +683,149 @@
       uChaosAngle: { value: 0 }, // accumulated shimmer angle (uChaos integrated over time)
       uVibrato: { value: 0 },     // 0-1 vibrato intensity, mirrors the audio LFO depth
       uVibratoFreq: { value: 5.5 }, // Hz — must match VIBRATO_HZ in the audio engine
+      uEcho: { value: 0 },        // 0-1 echo intensity — drives ghost trail visibility
+      uEchoDelay: { value: 0.3 }, // seconds between ghost taps (mirrors audio delay time)
+      uEchoTap: { value: 0 },     // 0 = live particle; 1+ = delayed ghost copies
       uPulse: { value: 0 },
       uPixel: { value: Math.min(devicePixelRatio, 2) },
       uColA: { value: COL_CYAN },
       uColB: { value: COL_VIOLET },
     };
 
-    const sphereMat = new THREE.ShaderMaterial({
-      uniforms: sphereUniforms,
-      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
-      vertexShader: `
+    const sphereVertShader = `
     attribute vec3  aDir;
     attribute float aSeed;
     attribute float aShell;
-    uniform float uTime, uRadius, uChaos, uChaosAngle, uVibrato, uVibratoFreq, uPulse, uPixel;
-    varying float vSeed, vShade, vShell, vCond;
+    uniform float uTime, uRadius, uChaos, uChaosAngle, uVibrato, uVibratoFreq;
+    uniform float uEcho, uEchoDelay, uEchoTap, uPulse, uPixel;
+    varying float vSeed, vShade, vShell, vCond, vEcho;
 
-    void main(){
-      vSeed = aSeed; vShell = aShell;
+    // particle position at time t (same path the live particle follows)
+    vec3 particlePos(float t){
       vec3 d = aDir;
-
-      // gentle coherent shimmer (no more violent per-particle swirl)
       float aRot = uChaosAngle + aSeed * 0.3 * uChaos;
       float c = cos(aRot), s = sin(aRot);
       d = vec3(c*d.x - s*d.z, d.y, s*d.x + c*d.z);
 
-      // breathing wobble + pulse wave travelling outward
-      float wob  = sin(uTime*(1.5+aSeed*2.0) + aSeed*40.0) * 0.035;
-      float wave = sin(d.y*6.0 - uTime*3.0) * 0.02 * (1.0-uChaos);
+      float wob  = sin(t*(1.5+aSeed*2.0) + aSeed*40.0) * 0.035;
+      float wave = sin(d.y*6.0 - t*3.0) * 0.02 * (1.0-uChaos);
       float r = uRadius * aShell * (1.0 + wob + wave) * (1.0 + uPulse*0.12);
       vec3 spherePos = d * r;
 
-      // condensed form: an orbital "gyroscope" — a breathing core wrapped in
-      // three tilted, counter-rotating particle rings plus a sparse halo of
-      // drifting motes. Rings have real tube thickness and per-particle phase
-      // so the dots keep their texture instead of stacking into a solid blob.
       float k = smoothstep(0.45, 0.95, uChaos);
-      float h1 = fract(aSeed*17.131);   // independent per-particle randoms
+      float h1 = fract(aSeed*17.131);
       float h2 = fract(aSeed*39.719);
       float h3 = fract(aSeed*83.377);
       vec3 condensed;
       if(aSeed < 0.16){
-        // pulsing kernel, hot and dense at the centre
-        condensed = d * (0.10 + h1*h1*0.30) * (1.0 + sin(uTime*2.4 + h2*6.2831)*0.08);
-        vCond = 1.0;
+        condensed = d * (0.10 + h1*h1*0.30) * (1.0 + sin(t*2.4 + h2*6.2831)*0.08);
       } else if(aSeed < 0.86){
-        // three rings, ~2800 particles each, distinct radius/tilt/speed/direction
-        float band = floor((aSeed - 0.16) / 0.2334);            // 0, 1, 2
+        float band = floor((aSeed - 0.16) / 0.2334);
         float dir  = mix(1.0, -1.0, mod(band, 2.0));
-        float u    = h1*6.2831 + uTime*(0.5 + band*0.22)*dir;   // orbit angle
-        float v    = h2*6.2831 + uTime*1.6;                      // tube swirl
-        float tw   = 0.055 + h3*0.085;                           // tube thickness
+        float u    = h1*6.2831 + t*(0.5 + band*0.22)*dir;
+        float v    = h2*6.2831 + t*1.6;
+        float tw   = 0.055 + h3*0.085;
         float R    = 0.82 + band*0.22;
         vec3 p = vec3((R + tw*cos(v))*cos(u), tw*sin(v)*1.5, (R + tw*cos(v))*sin(u));
         float tilt = 0.45 + band*1.05;
         float ct = cos(tilt), st = sin(tilt);
         p = (band < 1.5)
-          ? vec3(p.x, ct*p.y - st*p.z, st*p.y + ct*p.z)          // rings 0,1: tilt about X
-          : vec3(ct*p.x - st*p.y, st*p.x + ct*p.y, p.z);         // ring 2: tilt about Z
+          ? vec3(p.x, ct*p.y - st*p.z, st*p.y + ct*p.z)
+          : vec3(ct*p.x - st*p.y, st*p.x + ct*p.y, p.z);
         condensed = p;
-        vCond = 0.85;
       } else {
-        // faint motes orbiting the whole assembly — depth + see-through volume
         condensed = d * (1.3 + h1*0.55);
-        condensed.y += sin(uTime*0.8 + h2*6.2831)*0.09;
-        vCond = 0.3;
+        condensed.y += sin(t*0.8 + h2*6.2831)*0.09;
       }
 
       vec3 pos = mix(spherePos, condensed, k);
-      // slight vertical drift of loose motes
-      pos.y += sin(uTime*0.7 + aSeed*20.0) * 0.03 * (1.0-k);
+      pos.y += sin(t*0.7 + aSeed*20.0) * 0.03 * (1.0-k);
+      pos += aDir * sin(t*6.2831853*uVibratoFreq + aSeed*6.2831853) * uVibrato * 0.09;
+      return pos;
+    }
 
-      // radial jitter locked to the audio vibrato rate — particles visibly
-      // shiver in sync with the pitch wobble when rotation charges vibrato
-      pos += aDir * sin(uTime*6.2831853*uVibratoFreq + aSeed*6.2831853) * uVibrato * 0.09;
+    void main(){
+      vSeed = aSeed; vShell = aShell;
+      // live = full; each successive tap is smaller/fainter, gated by uEcho
+      vEcho = (uEchoTap < 0.5) ? 1.0 : uEcho * pow(0.55, uEchoTap - 1.0);
+      vCond = aSeed < 0.16 ? 1.0 : (aSeed < 0.86 ? 0.85 : 0.3);
+
+      vec3 pos = particlePos(uTime);
+      // clones: estimate velocity, then step backwards by tap * delay
+      // so each ghost sits where the particle was ~N delay-intervals ago
+      if(uEchoTap > 0.5){
+        float dt = 0.0166667;
+        vec3 vel = (particlePos(uTime + dt) - pos) / dt;
+        pos -= vel * uEchoTap * uEchoDelay;
+      }
 
       vec4 mv = modelViewMatrix * vec4(pos, 1.0);
       gl_Position = projectionMatrix * mv;
 
+      float k = smoothstep(0.45, 0.95, uChaos);
       float base = (1.6 + aSeed*2.6) * (aShell > .9 ? 1.0 : 1.4);
-      base *= mix(1.0, 0.68, k);                                  // finer grain when condensed
+      base *= mix(1.0, 0.68, k);
+      base *= (uEchoTap < 0.5) ? 1.0 : pow(0.68, uEchoTap);
       gl_PointSize = base * uPixel * (26.0 / -mv.z) * (1.0 + uPulse*0.5);
 
-      // shade: rim brighter than face (fake fresnel via view-dot)
       vec3 nrm = normalize(mat3(modelViewMatrix) * aDir);
       vShade = 1.0 - abs(nrm.z);
-    }`,
-      fragmentShader: `
+    }`;
+
+    const sphereFragShader = `
     uniform float uTime, uChaos;
     uniform vec3 uColA, uColB;
-    varying float vSeed, vShade, vShell, vCond;
+    varying float vSeed, vShade, vShell, vCond, vEcho;
 
     void main(){
+      if(vEcho < 0.01) discard;
       vec2 p = gl_PointCoord - 0.5;
-      // square "pixel" body with a soft additive halo
       float sq   = 1.0 - smoothstep(0.26, 0.34, max(abs(p.x), abs(p.y)));
       float halo = 1.0 - smoothstep(0.0, 0.5, length(p));
       float alpha = sq*0.85 + halo*halo*0.35;
 
-      // data flicker
       alpha *= 0.65 + 0.35*sin(uTime*(6.0+vSeed*14.0) + vSeed*80.0);
-      // prevent additive washout when condensed
       float k = smoothstep(0.45, 0.95, uChaos);
       alpha *= 1.0 - 0.15*k;
-      // per-group weighting of the condensed form: core bright, rings mid,
-      // halo motes faint — keeps the gyroscope readable and see-through
       alpha *= mix(1.0, vCond, k);
+      alpha *= vEcho;
 
       vec3 col = mix(uColA, uColB, vSeed*0.55 + vShade*0.35);
-      col += vec3(0.9,0.95,1.0) * pow(vShade, 3.0) * 0.6;   // rim sparkle
-      col = mix(col, vec3(1.0,0.82,0.9), k*0.3*vSeed);      // hot condensed tint
+      col += vec3(0.9,0.95,1.0) * pow(vShade, 3.0) * 0.6;
+      col = mix(col, vec3(1.0,0.82,0.9), k*0.3*vSeed);
 
       float fade = vShell > .9 ? 1.0 : 0.55;
       gl_FragColor = vec4(col, alpha * fade);
       if(gl_FragColor.a < 0.015) discard;
-    }`
+    }`;
+
+    const sphereMat = new THREE.ShaderMaterial({
+      uniforms: sphereUniforms,
+      transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+      vertexShader: sphereVertShader,
+      fragmentShader: sphereFragShader,
     });
 
     const sphere = new THREE.Points(sphereGeo, sphereMat);
     sphere.position.y = 0.55;
     scene.add(sphere);
+
+    // up to 3 ghost clones — same geometry; each tap steps further back along
+    // the particle's current velocity by one delay interval
+    const ECHO_VISUAL_TAPS = 3;
+    const echoGhosts = [];
+    for (let tap = 1; tap <= ECHO_VISUAL_TAPS; tap++) {
+      const gMat = new THREE.ShaderMaterial({
+        uniforms: Object.assign({}, sphereUniforms, { uEchoTap: { value: tap } }),
+        transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+        vertexShader: sphereVertShader,
+        fragmentShader: sphereFragShader,
+      });
+      const ghost = new THREE.Points(sphereGeo, gMat);
+      ghost.visible = false;
+      sphere.add(ghost);
+      echoGhosts.push(ghost);
+    }
 
     /* -- equatorial data rings (two counter-rotating particle rings) -- */
     function makeRing(radius, count, tilt) {
@@ -999,6 +1022,7 @@
     const ECHO_FEEDBACK_MIN = 0.2;   // feedback at echoAmt 0
     const ECHO_FEEDBACK_MAX = 0.7;   // feedback at echoAmt 1
     const ECHO_MOTION_WEIGHT = 0.8;  // how much hand-travel speed feeds echoAmt
+    sphereUniforms.uEchoDelay.value = ECHO_DELAY_SEC;
 
     // Vibrato (CW / right tilt + hand travel)
     const VIBRATO_CENTS_MAX = 180;   // detune depth in cents at full vibAmt
@@ -1298,6 +1322,9 @@
         ECHO_FEEDBACK_MIN + echoAmt * (ECHO_FEEDBACK_MAX - ECHO_FEEDBACK_MIN), now, RAMP);
 
       sphereUniforms.uVibrato.value += (vibAmt - sphereUniforms.uVibrato.value) * Math.min(1, dt * 8);
+      sphereUniforms.uEcho.value += (echoAmt - sphereUniforms.uEcho.value) * Math.min(1, dt * 8);
+      const echoOn = sphereUniforms.uEcho.value > 0.02;
+      for (let i = 0; i < echoGhosts.length; i++) echoGhosts[i].visible = echoOn;
 
       // pan follows left/right hand position
       audio.panner.pan.setTargetAtTime(THREE.MathUtils.clamp(state.tx / 3, -1, 1), now, RAMP);
@@ -1340,6 +1367,8 @@
         if (audio.tremGain) audio.tremGain.gain.setTargetAtTime(1, audio.ctx.currentTime, 0.08);
         audio.tremHz = 0; audio.tremBpm = 0; audio.tremDepthAmt = 0;
         sphereUniforms.uVibrato.value = 0;
+        sphereUniforms.uEcho.value = 0;
+        for (let i = 0; i < echoGhosts.length; i++) echoGhosts[i].visible = false;
         $('btn-sound').textContent = 'SOUND OFF';
         $('btn-sound').classList.add('ghost');
       }
