@@ -318,7 +318,8 @@
       position: absolute;
       inset: 0;
       width: 100%;
-      height: 100%
+      height: 100%;
+      pointer-events: none;
     }
 
     #cam-wrap .tag {
@@ -1099,10 +1100,24 @@
     [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [17, 18], [18, 19], [19, 20], [0, 17]];
     function drawHand(lm) {
       const cv = $('cam-overlay'), ctx = cv.getContext('2d');
-      cv.width = cv.clientWidth; cv.height = cv.clientHeight;
-      ctx.clearRect(0, 0, cv.width, cv.height);
+      const video = $('cam-video');
+      const cw = cv.clientWidth, ch = cv.clientHeight;
+      if (!cw || !ch) return;
+      if (cv.width !== cw || cv.height !== ch) { cv.width = cw; cv.height = ch; }
+      else ctx.clearRect(0, 0, cw, ch);
       if (!lm) return;
-      const px = p => [(1 - p.x) * cv.width, p.y * cv.height];  // mirrored
+
+      // Map landmarks through the same object-fit:cover crop as #cam-video.
+      // Stretching 0–1 → box size squashes the skeleton when mobile Safari's
+      // camera aspect (often taller than 4:3) is cropped into the preview.
+      const vw = video.videoWidth || cw;
+      const vh = video.videoHeight || ch;
+      const scale = Math.max(cw / vw, ch / vh);
+      const dw = vw * scale, dh = vh * scale;
+      const ox = (cw - dw) / 2, oy = (ch - dh) / 2;
+      // (1 - x) matches the video's CSS scaleX(-1) mirror
+      const px = p => [(1 - p.x) * dw + ox, p.y * dh + oy];
+
       ctx.strokeStyle = 'rgba(75,232,255,.85)'; ctx.lineWidth = 1.2;
       ctx.shadowColor = 'rgba(75,232,255,.8)'; ctx.shadowBlur = 4;
       for (const [a, b] of CONN) {
