@@ -964,12 +964,9 @@
 
       const lin = THREE.MathUtils.clamp((ext - cal.lo) / (cal.hi - cal.lo), 0, 1);
       dbg.lin = lin;
-      // The palm-proximity metric is cosine-flat at the START of a curl: at full
-      // extension the tips move perpendicular to the palm-centre direction, so
-      // ext changes only at second order for the first part of the squeeze.
-      // This remap expands top-end sensitivity so early closing registers
-      // immediately, at the cost of slightly gentler response near the fist.
-      let open = 1 - Math.pow(1 - lin, 0.72);
+      // Map ext → openness linearly so sphere size tracks the gesture evenly
+      // from fist (0%) to open (100%), without a top-heavy remap.
+      let open = lin;
       // Soft peak guards: smoothly blend `open` toward 1 near cal.hi and
       // toward 0 near cal.lo, so a hand that's fully open or fully closed
       // and simply rotating/trembling doesn't read as shrinking/reopening.
@@ -1222,10 +1219,12 @@
 
       /* smooth openness + spring the radius (gives it satisfying inertia) */
       state.openness += (state.targetOpen - state.openness) * Math.min(1, dt * 10);
-      // normal breathing range, plus an accelerating "engulf" term near full openness
-      // that pushes the shell out past the camera so the particles surround the viewer
-      const engulf = Math.pow(Math.max(0, (state.openness - 0.78) / 0.22), 2) * 11.0;
-      const targetRadius = 0.9 + state.openness * 2.6 + engulf;
+      // Same endpoints as the original (fist ≈ 0.9, fully open ≈ 14.5), with a
+      // mild ease-in so size still accelerates toward open — but much smoother
+      // than the old engulf, which dumped almost all growth above ~78%.
+      // Exponent 1 = linear; original felt closer to a late, sharp spike (~2–3).
+      const SIZE_EASE = 1.25;
+      const targetRadius = 0.9 + Math.pow(state.openness, SIZE_EASE) * 13.6;
       const spring = (targetRadius - state.radius) * 40;
       state.radiusVel = (state.radiusVel + spring * dt) * Math.exp(-5.5 * dt);
       state.radius += state.radiusVel * dt;
