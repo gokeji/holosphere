@@ -686,8 +686,6 @@
       uEcho: { value: 0 },        // 0-1 echo intensity — drives ghost trail visibility
       uEchoDelay: { value: 0.3 }, // seconds between ghost taps (mirrors audio delay time)
       uEchoTap: { value: 0 },     // 0 = live particle; 1+ = delayed ghost copies
-      uOmega: { value: new THREE.Vector3() },  // sphere angular vel (local space, rad/s)
-      uLinVel: { value: new THREE.Vector3() }, // sphere linear vel (local space)
       uPulse: { value: 0 },
       uPixel: { value: Math.min(devicePixelRatio, 2) },
       uColA: { value: COL_CYAN },
@@ -700,7 +698,6 @@
     attribute float aShell;
     uniform float uTime, uRadius, uChaos, uChaosAngle, uVibrato, uVibratoFreq;
     uniform float uEcho, uEchoDelay, uEchoTap, uPulse, uPixel;
-    uniform vec3 uOmega, uLinVel;
     varying float vSeed, vShade, vShell, vCond, vEcho;
 
     // Full particle path at time t — orbit, waves, breathing, vibrato, etc.
@@ -758,15 +755,15 @@
       vEcho = (uEchoTap < 0.5) ? 1.0 : echoLocal * echoMaxOp;
       vCond = aSeed < 0.16 ? 1.0 : (aSeed < 0.86 ? 0.85 : 0.3);
 
-      // Place clones by stepping back along the particle's current velocity —
-      // local animation (waves/orbit) + sphere spin + hand translation
+      // Clones are children of the sphere, so hand rotate/translate already
+      // carries them. Trail only along each particle's local animation velocity —
+      // adding spin/hand vel here left them behind in world space, then snapped
+      // back when motion stopped.
       vec3 pos = particlePos(uTime);
       if(uEchoTap > 0.5){
         float dtSamp = 0.0166667;
         float echoDt = uEchoTap * uEchoDelay;
         vec3 vel = (particlePos(uTime + dtSamp) - pos) / dtSamp;
-        vel += cross(uOmega, pos);
-        vel += uLinVel;
         pos -= vel * echoDt;
       }
 
@@ -1834,7 +1831,6 @@
     const _zQ = new THREE.Quaternion(), _naturalYQ = new THREE.Quaternion();
     const _zAxis = new THREE.Vector3(0, 0, 1), _yAxis = new THREE.Vector3(0, 1, 0);
     const _prevSpherePos = new THREE.Vector3(), _prevSphereQ = new THREE.Quaternion(), _actualDQ = new THREE.Quaternion();
-    const _echoInvQ = new THREE.Quaternion();
 
     function animate() {
       requestAnimationFrame(animate);
@@ -1884,16 +1880,6 @@
       _actualDQ.copy(_prevSphereQ).invert().premultiply(sphere.quaternion);
       const actualAngle = 2 * Math.acos(THREE.MathUtils.clamp(Math.abs(_actualDQ.w), -1, 1));
       const frameDt = Math.max(dt, 1e-6);
-
-      // Echo trails: natural Y spin + hand Z rate + hand translation (local space).
-      const omega = sphereUniforms.uOmega.value;
-      omega.copy(_yAxis).applyQuaternion(_zQ).multiplyScalar(naturalYSpeed); // natural spin
-      omega.addScaledVector(_zAxis, state.rotVel);                         // hand twist
-      _echoInvQ.copy(sphere.quaternion).invert();
-      omega.applyQuaternion(_echoInvQ);
-      const lin = sphereUniforms.uLinVel.value;
-      lin.copy(sphere.position).sub(_prevSpherePos).divideScalar(frameDt);
-      lin.applyQuaternion(_echoInvQ);
 
       state.motion.positionSpeed = sphere.position.distanceTo(_prevSpherePos) / frameDt;
       state.motion.zOrientationSpeed = state.rotSpeed;
