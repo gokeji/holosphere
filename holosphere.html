@@ -985,10 +985,10 @@
     /* ================================================================
        FX TUNING — adjust these to reshape tremolo / echo / vibrato
        ================================================================ */
-    const TILT_DEADZONE_DEG = 5;     // no tilt-driven FX inside ±this from finger-up
+    const TILT_DEADZONE_DEG = 5;     // all FX off inside ±this from finger-up
 
     // Tremolo (CW / right tilt + rightward travel). Strength 0→1 maps to:
-    const TREM_BPM_MIN = 100;          // BPM at strength 0
+    const TREM_BPM_MIN = 60;          // BPM at strength 0
     const TREM_BPM_MAX = 400;        // BPM at strength 1
     const TREM_DEPTH_MIN = 0.7;      // gain duck at strength just above 0 (0–1)
     const TREM_DEPTH_MAX = 0.9;      // gain duck at strength 1
@@ -1220,44 +1220,46 @@
       audio.brightness.frequency.setTargetAtTime(300 + state.openness * 3200, now, RAMP);
 
       // held tilt maps to effect depth, with a deadzone around finger-up
-      // so a nearly-upright hand turns every tilt effect fully off.
-      // Outside the deadzone the remaining swing remaps to 0→1.
+      // where EVERY modulation effect is fully off. Outside the deadzone
+      // the remaining swing remaps to 0→1.
       // negative handAngle = clockwise (fingertips toward user's right);
       // positive = counter-clockwise (toward user's left).
       const TILT_DEAD_RAD = THREE.MathUtils.degToRad(TILT_DEADZONE_DEG);
+      const inDeadzone = Math.abs(state.handAngle) <= TILT_DEAD_RAD;
       const tiltSpan = MAX_HAND_ANGLE - TILT_DEAD_RAD;
       const absAng = Math.abs(state.handAngle);
-      const tiltMag = absAng <= TILT_DEAD_RAD
+      const tiltMag = inDeadzone
         ? 0
         : THREE.MathUtils.clamp((absAng - TILT_DEAD_RAD) / tiltSpan, 0, 1);
       const cwAmt = state.handAngle < 0 ? tiltMag : 0;  // right / CW
       const ccwAmt = state.handAngle > 0 ? tiltMag : 0; // left / CCW
 
-      // hand travel speed feeds vibrato/echo on top of tilt: waving the hand
-      // around deepens the vibrato and opens the echo send even untilted.
-      // Fast attack / slow release so a quick sweep sustains the effect for
-      // a beat instead of flickering with per-frame jitter.
+      // hand travel speed feeds vibrato/echo/tremolo on top of tilt — but
+      // only outside the deadzone. Inside it, motion charge is cleared so
+      // nothing is latched when you leave the upright band.
       const vx = (state.tx - audio.prevTx) / Math.max(dt, 1e-3); // signed: + = rightward
       const speed = Math.hypot(state.tx - audio.prevTx, state.ty - audio.prevTy) / Math.max(dt, 1e-3);
       audio.prevTx = state.tx; audio.prevTy = state.ty;
-      // NOTE tx only spans ~±1.2 in hand mode and is median+EMA smoothed
-      // before it gets here, so real filtered velocities top out around
-      // 1.5–2 units/s — the earlier /4 threshold made motion barely register
-      const motionTarget = THREE.MathUtils.clamp(speed / 1.4, 0, 1);
-      const mk = motionTarget > audio.motion ? 10 : 2.2;
-      audio.motion += (motionTarget - audio.motion) * Math.min(1, dt * mk);
+      if (inDeadzone) {
+        audio.motion = 0;
+        audio.motionRight = 0;
+      } else {
+        // NOTE tx only spans ~±1.2 in hand mode and is median+EMA smoothed
+        // before it gets here, so real filtered velocities top out around
+        // 1.5–2 units/s — the earlier /4 threshold made motion barely register
+        const motionTarget = THREE.MathUtils.clamp(speed / 1.4, 0, 1);
+        const mk = motionTarget > audio.motion ? 10 : 2.2;
+        audio.motion += (motionTarget - audio.motion) * Math.min(1, dt * mk);
+
+        const rightTarget = THREE.MathUtils.clamp(vx / 0.7, 0, 1);
+        const rk = rightTarget > audio.motionRight ? 12 : 2.0;
+        audio.motionRight += (rightTarget - audio.motionRight) * Math.min(1, dt * rk);
+      }
 
       // tremolo: clockwise / right tilt only (ccwAmt never contributes).
       // Rightward travel still charges depth on top of that.
-      const rightTarget = THREE.MathUtils.clamp(vx / 0.7, 0, 1);
-      const rk = rightTarget > audio.motionRight ? 12 : 2.0;
-      audio.motionRight += (rightTarget - audio.motionRight) * Math.min(1, dt * rk);
-      // T key toggles a validation mode: tremolo pinned to full depth with
-      // every other effect muted, so the pulse can be heard in isolation
-      const tremAmt = audio.tremTest ? 1 : audio.motionRight;
-      const rotDepth = cwAmt; // right tilt only — left tilt stays at 0
-      // Strength 0–1: 0 at the deadzone edge, 1 at the tilt cap
-      const strength = Math.min(1, Math.max(tremAmt, rotDepth));
+      // Strength 0–1: 0 in the deadzone / at its edge, 1 at the tilt cap
+      const strength = inDeadzone ? 0 : Math.min(1, Math.max(audio.motionRight, cwAmt));
       const tremBpm = TREM_BPM_MIN + strength * (TREM_BPM_MAX - TREM_BPM_MIN);
       const tremHz = tremBpm / 60;
       const depth = strength > 0.001
@@ -1280,8 +1282,12 @@
       // audibly and visibly speed up together as rotation increases
       sphereUniforms.uVibratoFreq.value += ((tremHz || VIBRATO_HZ) - sphereUniforms.uVibratoFreq.value) * Math.min(1, dt * 6);
 
-      const vibAmt = audio.tremTest ? 0 : THREE.MathUtils.clamp(cwAmt + audio.motion, 0, 1);
-      const echoAmt = audio.tremTest
+      // T key (tremTest) only mutes vibrato/detune so tremolo is easier to hear.
+      // Deadzone forces all modulation off.
+      const vibAmt = (audio.tremTest || inDeadzone)
+        ? 0
+        : THREE.MathUtils.clamp(cwAmt + audio.motion, 0, 1);
+      const echoAmt = inDeadzone
         ? 0
         : THREE.MathUtils.clamp(ccwAmt + audio.motion * ECHO_MOTION_WEIGHT, 0, 1);
 
@@ -1291,11 +1297,7 @@
       audio.echoFeedback.gain.setTargetAtTime(
         ECHO_FEEDBACK_MIN + echoAmt * (ECHO_FEEDBACK_MAX - ECHO_FEEDBACK_MIN), now, RAMP);
 
-      // drive the particle shiver from tremolo in test mode (vibrato is muted
-      // there), otherwise from vibrato — so the sphere always shows the
-      // effect you're hearing
-      const shiverAmt = audio.tremTest ? strength : vibAmt;
-      sphereUniforms.uVibrato.value += (shiverAmt - sphereUniforms.uVibrato.value) * Math.min(1, dt * 8);
+      sphereUniforms.uVibrato.value += (vibAmt - sphereUniforms.uVibrato.value) * Math.min(1, dt * 8);
 
       // pan follows left/right hand position
       audio.panner.pan.setTargetAtTime(THREE.MathUtils.clamp(state.tx / 3, -1, 1), now, RAMP);
@@ -1610,7 +1612,7 @@
       if (e.key === 't' || e.key === 'T') {
         audio.tremTest = !audio.tremTest;
         toast(audio.tremTest
-          ? 'TREMOLO TEST ON — FULL DEPTH, VIBRATO/ECHO MUTED, ROTATE FOR RATE'
+          ? 'TREMOLO TEST ON — VIBRATO/DETUNE MUTED'
           : 'TREMOLO TEST OFF');
       }
     });
