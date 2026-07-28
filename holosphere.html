@@ -587,6 +587,7 @@
       uTime: { value: 0 },
       uRadius: { value: 1.4 },
       uChaos: { value: 0.6 },   // 1 = fist (swirling collapse), 0 = open
+      uChaosAngle: { value: 0 }, // accumulated shimmer angle (uChaos integrated over time)
       uPulse: { value: 0 },
       uPixel: { value: Math.min(devicePixelRatio, 2) },
       uColA: { value: COL_CYAN },
@@ -600,7 +601,7 @@
     attribute vec3  aDir;
     attribute float aSeed;
     attribute float aShell;
-    uniform float uTime, uRadius, uChaos, uPulse, uPixel;
+    uniform float uTime, uRadius, uChaos, uChaosAngle, uPulse, uPixel;
     varying float vSeed, vShade, vShell, vCond;
 
     void main(){
@@ -608,7 +609,7 @@
       vec3 d = aDir;
 
       // gentle coherent shimmer (no more violent per-particle swirl)
-      float aRot = uTime * uChaos * 0.35 + aSeed * 0.3 * uChaos;
+      float aRot = uChaosAngle + aSeed * 0.3 * uChaos;
       float c = cos(aRot), s = sin(aRot);
       d = vec3(c*d.x - s*d.z, d.y, s*d.x + c*d.z);
 
@@ -1039,8 +1040,13 @@
         state.hasOrientation = true;
         return;
       }
+      // grip gate: closing/opening the hand jitters the wrist→MCP landmarks
+      // (self-occlusion), which would otherwise read as a rapid Z spin —
+      // widen the dead zone while the grip is actively changing.
+      const gripGate = THREE.MathUtils.clamp(1 - state.openVel * 12, 0, 1);
+      const deadzone = ORIENTATION_DEADZONE / Math.max(gripGate, 0.05);
       const change = angleDelta(filtered, state.targetHandAngle);
-      if (Math.abs(change) > ORIENTATION_DEADZONE) state.targetHandAngle += change;
+      if (Math.abs(change) > deadzone) state.targetHandAngle += change;
     }
 
     /* ----- debug readout (press D): raw metric for calibration ----- */
@@ -1230,6 +1236,7 @@
       state.radius += state.radiusVel * dt;
       sphereUniforms.uRadius.value = state.radius;
       sphereUniforms.uChaos.value = 1 - state.openness;
+      sphereUniforms.uChaosAngle.value += sphereUniforms.uChaos.value * dt * 0.35;
       sphereUniforms.uPulse.value = Math.abs(state.radiusVel) * 0.25;
 
       /* pop feedback on fast open/close */
