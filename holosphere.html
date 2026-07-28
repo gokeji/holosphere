@@ -681,8 +681,11 @@
       uRadius: { value: 1.4 },
       uChaos: { value: 0.6 },   // 1 = fist (swirling collapse), 0 = open
       uChaosAngle: { value: 0 }, // accumulated shimmer angle (uChaos integrated over time)
-      uVibrato: { value: 0 },     // 0-1 vibrato intensity, mirrors the audio LFO depth
-      uVibratoFreq: { value: 5.5 }, // Hz — must match VIBRATO_HZ in the audio engine
+      uVibrato: { value: 0 },     // 0-1 tremolo/vibrato strength — drives particle shake
+      uVibratoFreq: { value: 5.5 }, // Hz — mirrors tremolo rate (HUD / debug)
+      uVibratoAmp: { value: 0.1 },  // max shake distance at full strength
+      uVibratoCurve: { value: 1.5 }, // amp curve exponent (>1 = bigger leaps at high strength)
+      uTremPhase: { value: 0 },    // shared with audio tremolo LFO — keeps shake on the beat
       uEcho: { value: 0 },        // 0-1 echo intensity — drives ghost trail visibility
       uEchoDelay: { value: 0.2 },  // seconds between visual ghost taps (trail spacing)
       uEchoTap: { value: 0 },     // 0 = live particle; 1+ = delayed ghost copies
@@ -698,6 +701,7 @@
     attribute float aSeed;
     attribute float aShell;
     uniform float uTime, uRadius, uChaos, uChaosAngle, uVibrato, uVibratoFreq;
+    uniform float uVibratoAmp, uVibratoCurve, uTremPhase;
     uniform float uEcho, uEchoDelay, uEchoTap, uEchoTaps, uPulse, uPixel;
     varying float vSeed, vShade, vShell, vCond, vEcho;
 
@@ -739,7 +743,18 @@
       }
 
       vec3 pos = mix(spherePos, condensed, k);
-      pos += aDir * sin(t*6.2831853*uVibratoFreq + aSeed*6.2831853) * uVibrato * 0.09;
+      // tremolo: back-and-forth along an axis that slowly precesses around
+      // the rest point. Oscillation uses the shared audio LFO phase so the
+      // whole sphere pulses with the tremolo BPM (not per-particle chaos).
+      float vibAmp = pow(clamp(uVibrato, 0.0, 1.0), uVibratoCurve) * uVibratoAmp;
+      if(vibAmp > 1e-5){
+        vec3 radial = length(pos) > 1e-4 ? normalize(pos) : normalize(d);
+        vec3 u = normalize(cross(radial, abs(radial.y) < 0.9 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+        vec3 v = cross(radial, u);
+        float slow = t * 6.2831853 * 0.28 + aSeed * 12.566; // ~0.28 Hz axis drift
+        vec3 oscDir = u * cos(slow) + v * sin(slow);
+        pos += oscDir * sin(uTremPhase) * vibAmp;
+      }
       return pos;
     }
 
@@ -1038,6 +1053,11 @@
 
     // Vibrato (CW / right tilt + hand travel)
     const VIBRATO_CENTS_MAX = 180;   // detune depth in cents at full vibAmt
+    // Particle shake (visual) — scales with tremolo strength alongside frequency
+    const VIB_SHAKE_AMP_MAX = 0.1;   // world-unit displacement at full strength
+    const VIB_SHAKE_CURVE = 1.5;     // >1 = subtle early, larger leaps near full
+    sphereUniforms.uVibratoAmp.value = VIB_SHAKE_AMP_MAX;
+    sphereUniforms.uVibratoCurve.value = VIB_SHAKE_CURVE;
     /* ================================================================ */
 
     function initAudio() {
@@ -1314,8 +1334,8 @@
       audio.tremHz = tremHz;
       audio.tremBpm = tremBpm;
       audio.tremDepthAmt = depth;
-      // particles: same rate drives the shiver speed, so the visual wobble
-      // audibly and visibly speed up together as rotation increases
+      // particles share the audio LFO phase so shake locks to tremolo BPM
+      sphereUniforms.uTremPhase.value = audio.tremPhase;
       sphereUniforms.uVibratoFreq.value += ((tremHz || VIBRATO_HZ) - sphereUniforms.uVibratoFreq.value) * Math.min(1, dt * 6);
 
       // T key (tremTest) only mutes vibrato/detune so tremolo is easier to hear.
@@ -1333,7 +1353,9 @@
       audio.echoFeedback.gain.setTargetAtTime(
         ECHO_FEEDBACK_MIN + echoAmt * (ECHO_FEEDBACK_MAX - ECHO_FEEDBACK_MIN), now, RAMP);
 
-      sphereUniforms.uVibrato.value += (vibAmt - sphereUniforms.uVibrato.value) * Math.min(1, dt * 8);
+      // particle shake tracks tremolo strength (same source as frequency)
+      const shakeAmt = audio.tremTest ? 0 : strength;
+      sphereUniforms.uVibrato.value += (shakeAmt - sphereUniforms.uVibrato.value) * Math.min(1, dt * 8);
       sphereUniforms.uEcho.value += (echoAmt - sphereUniforms.uEcho.value) * Math.min(1, dt * 8);
       // Reveal each ghost as soon as its fade window starts (shader owns the ramp)
       const echoVal = sphereUniforms.uEcho.value;
