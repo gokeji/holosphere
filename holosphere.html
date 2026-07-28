@@ -869,6 +869,15 @@
        stretches to your actual range of motion. Press D for live readouts. */
     const CAL_DEF = { lo: 0.40, hi: 0.86 };
     const cal = { lo: CAL_DEF.lo, hi: CAL_DEF.hi };
+    /* Rotating an unchanged fully-open hand still modulates ext by ~±0.01
+       (foreshortening + landmark-z error). Auto-cal latches cal.hi onto the
+       PEAK ext ever seen, so without headroom the hand reads 100% open only at
+       the exact orientation where that peak occurred; at any other angle
+       lin < 1, and the 0.58 top-end remap plus the engulf radius term amplify
+       a 1% ext dip into a large visible shrink. Treating anything within this
+       margin of cal.hi as fully open makes the expansion state
+       orientation-invariant. */
+    const CAL_HI_HEADROOM = 0.02;
     const FINGERS = [[5, 6, 7, 8], [9, 10, 11, 12], [13, 14, 15, 16], [17, 18, 19, 20]]; // index..pinky
     const PALM_IDS = [0, 5, 9, 13, 17];
     const dbg = { ext: 0, per: [0, 0, 0, 0], lin: 0, open: 0 };
@@ -905,7 +914,8 @@
       if (ext < cal.lo) cal.lo += (ext - cal.lo) * 0.5;
       cal.hi += (CAL_DEF.hi - cal.hi) * 0.0012;
       cal.lo += (CAL_DEF.lo - cal.lo) * 0.0012;
-      const lin = THREE.MathUtils.clamp((ext - cal.lo) / (cal.hi - cal.lo), 0, 1);
+      const hiEff = Math.max(cal.hi - CAL_HI_HEADROOM, cal.lo + 0.05);
+      const lin = THREE.MathUtils.clamp((ext - cal.lo) / (hiEff - cal.lo), 0, 1);
       // The palm-proximity metric is cosine-flat at the START of a curl: at full
       // extension the tips move perpendicular to the palm-centre direction, so
       // ext changes only at second order for the first part of the squeeze.
