@@ -554,7 +554,7 @@
       <div id="rot-center"></div>
       <div id="rot-fill"></div>
     </div>
-    <div id="rot-ticks"><span>-45°</span><span>0°</span><span>+45°</span></div>
+    <div id="rot-ticks"><span>-70°</span><span>0°</span><span>+70°</span></div>
   </div>
 
   <div class="hud" id="hud-bl">
@@ -930,20 +930,32 @@
 
     /* ============================================================
        3b. AUDIO ENGINE — gesture-driven instrument
-       Openness   → lead note (quantized scale) + filter brightness, and a
-                    highpass sweep on the pad/beat loop (closed = thinner)
-       Rotation   → held tilt angle (capped ±45°, middle finger up = 0°)
+       A 16-step groove (kick / snare / hats / sequenced bassline / pad)
+       runs constantly while sound is on.
+       Openness   → lowpass sweep over the whole mix: closed fist = deep,
+                    muffled, bass-heavy; open hand = full bright spectrum
+       Rotation   → held tilt angle (capped ±70°, middle finger up = 0°)
                     maps directly to effect depth: clockwise = vibrato,
                     counter-clockwise = feedback-delay (echo) send.
        Position   → tx = stereo pan, ty = formant/color filter
        ============================================================ */
     const audio = {
       enabled: false, ctx: null, prevOpenness: 0.55, plucking: 0,
-      nextKick: 0, nextHat: 0,
+      nextStep: 0, step: 0,
     };
     const SCALE_SEMITONES = [0, 3, 5, 7, 10, 12, 15, 17, 19, 22]; // pentatonic minor, ~2 octaves
     const BASE_FREQ = 98; // G2 — sits under the visual without booming
     const BEAT_SEC = 0.5; // 120 BPM quarter notes for the background loop
+    const STEP_SEC = BEAT_SEC / 4; // 16th-note sequencer grid
+    // 16-step patterns; numbers are velocities, null = rest. Bass values are
+    // semitone offsets from BASE_FREQ (G minor pentatonic).
+    const PAT = {
+      kick:  [1, 0, 0, 0,  1, 0, 0, 0,  1, 0, 0, 0,  1, 0, 0, 0.6],
+      snare: [0, 0, 0, 0,  1, 0, 0, 0,  0, 0, 0.35, 0,  1, 0, 0, 0],
+      hat:   [0.5, 0, 0.9, 0,  0.5, 0, 0.9, 0.35,  0.5, 0, 0.9, 0,  0.5, 0.35, 0, 0],
+      ohat:  [0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 0, 0,  0, 0, 1, 0],
+      bass:  [0, null, null, 12,  0, null, 0, 10,  null, 0, null, 7,  3, null, 10, null],
+    };
     const VIBRATO_HZ = 5.5; // shared with sphereUniforms.uVibratoFreq so particles shiver in sync
 
     function initAudio() {
@@ -951,8 +963,15 @@
       const ctx = new (window.AudioContext || window.webkitAudioContext)();
       audio.ctx = ctx;
 
+      // gentle bus compression so the drums can be mixed hot and punchy
+      // without the summed peaks clipping
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -18; comp.knee.value = 20; comp.ratio.value = 4;
+      comp.attack.value = 0.003; comp.release.value = 0.15;
+      comp.connect(ctx.destination);
+
       const master = ctx.createGain(); master.gain.value = 0.0001;
-      master.connect(ctx.destination);
+      master.connect(comp);
 
       const panner = ctx.createStereoPanner();
       panner.connect(master);
@@ -965,23 +984,35 @@
       delay.connect(feedback).connect(delay);
       delay.connect(echoWet).connect(master);
 
+      // grip filter — a lowpass over the ENTIRE mix, swept by openness:
+      // closed fist pulls it down so everything goes deep and muffled with
+      // the kick/bass still thumping through; open hand lets the full
+      // spectrum back in. Slight resonance so the sweep itself sounds alive.
+      const gripLP = ctx.createBiquadFilter();
+      gripLP.type = 'lowpass'; gripLP.frequency.value = 12000; gripLP.Q.value = 1.1;
+      gripLP.connect(panner);
+
       // formant/color filter — driven by hand height (ty)
       const formant = ctx.createBiquadFilter();
       formant.type = 'peaking'; formant.frequency.value = 1200; formant.Q.value = 0.9; formant.gain.value = 4;
-      formant.connect(panner);
+      formant.connect(gripLP);
 
       // brightness filter — driven by openness
       const brightness = ctx.createBiquadFilter();
       brightness.type = 'lowpass'; brightness.frequency.value = 800; brightness.Q.value = 0.7;
       brightness.connect(formant);
 
-      // two detuned voices for a bit of body (the lead "instrument")
+      // two detuned voices form the bassline instrument — always-running
+      // oscillators gated by a shared envelope that the step sequencer
+      // retriggers, so the "single held pitch" becomes a driving riff
       const lead = ctx.createOscillator(); lead.type = 'sawtooth'; lead.frequency.value = BASE_FREQ;
       const sub = ctx.createOscillator(); sub.type = 'triangle'; sub.frequency.value = BASE_FREQ / 2; sub.detune.value = -6;
       const leadGain = ctx.createGain(); leadGain.gain.value = 0.55;
       const subGain = ctx.createGain(); subGain.gain.value = 0.35;
-      lead.connect(leadGain).connect(brightness);
-      sub.connect(subGain).connect(brightness);
+      const bassEnv = ctx.createGain(); bassEnv.gain.value = 0.0001;
+      lead.connect(leadGain).connect(bassEnv);
+      sub.connect(subGain).connect(bassEnv);
+      bassEnv.connect(brightness);
 
       // vibrato LFO → lead/sub detune; depth follows clockwise hand tilt
       const vibratoLFO = ctx.createOscillator(); vibratoLFO.type = 'sine'; vibratoLFO.frequency.value = VIBRATO_HZ;
@@ -993,28 +1024,23 @@
 
       lead.start(); sub.start(); vibratoLFO.start();
 
-      // background pad + beat loop, always running once sound is on — the
-      // hand's openness sweeps a highpass filter across the whole loop
-      // (closed fist = thin/high, open hand = full body).
-      const beatHP = ctx.createBiquadFilter(); beatHP.type = 'highpass'; beatHP.frequency.value = 20; beatHP.Q.value = 0.5;
-      beatHP.connect(panner);
-
-      const padGain = ctx.createGain(); padGain.gain.value = 0.1;
+      // background pad — a soft root+fifth bed under the groove
+      const padGain = ctx.createGain(); padGain.gain.value = 0.08;
       const padRoot = ctx.createOscillator(); padRoot.type = 'sine'; padRoot.frequency.value = BASE_FREQ / 2;
       const padFifth = ctx.createOscillator(); padFifth.type = 'sine'; padFifth.frequency.value = (BASE_FREQ / 2) * 1.5;
-      padRoot.connect(padGain); padFifth.connect(padGain); padGain.connect(beatHP);
+      padRoot.connect(padGain); padFifth.connect(padGain); padGain.connect(gripLP);
       padRoot.start(); padFifth.start();
 
-      const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 0.2, ctx.sampleRate);
+      const noiseBuffer = ctx.createBuffer(1, ctx.sampleRate * 0.5, ctx.sampleRate);
       const noiseData = noiseBuffer.getChannelData(0);
       for (let i = 0; i < noiseData.length; i++) noiseData[i] = Math.random() * 2 - 1;
 
       audio.master = master; audio.panner = panner;
       audio.echoWet = echoWet; audio.echoFeedback = feedback;
       audio.formant = formant; audio.brightness = brightness;
-      audio.lead = lead; audio.sub = sub;
+      audio.lead = lead; audio.sub = sub; audio.bassEnv = bassEnv;
       audio.vibratoDepth = vibratoDepth;
-      audio.beatHP = beatHP; audio.noiseBuffer = noiseBuffer;
+      audio.gripLP = gripLP; audio.noiseBuffer = noiseBuffer;
     }
 
     function noteFreqFromOpenness(o) {
@@ -1038,34 +1064,79 @@
       osc.stop(now + 0.4);
     }
 
-    /* background loop hits — kick on the beat, hat on the offbeat */
-    function fireKick(time) {
+    /* groove voices — all routed through gripLP so the fist filter shapes
+       the whole loop at once */
+    function fireKick(time, v) {
       const ctx = audio.ctx;
       const osc = ctx.createOscillator(); osc.type = 'sine';
       const g = ctx.createGain();
-      osc.connect(g).connect(audio.beatHP);
-      osc.frequency.setValueAtTime(150, time);
-      osc.frequency.exponentialRampToValueAtTime(45, time + 0.12);
+      osc.connect(g).connect(audio.gripLP);
+      osc.frequency.setValueAtTime(190, time);
+      osc.frequency.exponentialRampToValueAtTime(45, time + 0.1);
       g.gain.setValueAtTime(0.0001, time);
-      g.gain.linearRampToValueAtTime(0.55, time + 0.005);
+      g.gain.linearRampToValueAtTime(1.0 * v, time + 0.004);
       g.gain.exponentialRampToValueAtTime(0.0001, time + 0.28);
       osc.start(time); osc.stop(time + 0.3);
     }
-    function fireHat(time) {
+    function fireSnare(time, v) {
       const ctx = audio.ctx;
       const src = ctx.createBufferSource(); src.buffer = audio.noiseBuffer;
-      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 7000;
+      const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = 1800; bp.Q.value = 0.8;
       const g = ctx.createGain();
-      src.connect(hp).connect(g).connect(audio.beatHP);
+      src.connect(bp).connect(g).connect(audio.gripLP);
       g.gain.setValueAtTime(0.0001, time);
-      g.gain.linearRampToValueAtTime(0.16, time + 0.003);
-      g.gain.exponentialRampToValueAtTime(0.0001, time + 0.06);
-      src.start(time); src.stop(time + 0.08);
+      g.gain.linearRampToValueAtTime(0.75 * v, time + 0.004);
+      g.gain.exponentialRampToValueAtTime(0.0001, time + 0.18);
+      src.start(time); src.stop(time + 0.2);
+      // tonal body under the noise crack
+      const osc = ctx.createOscillator(); osc.type = 'triangle'; osc.frequency.setValueAtTime(190, time);
+      const og = ctx.createGain();
+      osc.connect(og).connect(audio.gripLP);
+      og.gain.setValueAtTime(0.0001, time);
+      og.gain.linearRampToValueAtTime(0.45 * v, time + 0.004);
+      og.gain.exponentialRampToValueAtTime(0.0001, time + 0.12);
+      osc.start(time); osc.stop(time + 0.15);
+    }
+    function fireHat(time, v, open) {
+      const ctx = audio.ctx;
+      const src = ctx.createBufferSource(); src.buffer = audio.noiseBuffer;
+      const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = open ? 6000 : 7000;
+      const g = ctx.createGain();
+      src.connect(hp).connect(g).connect(audio.gripLP);
+      const decay = open ? 0.3 : 0.06;
+      g.gain.setValueAtTime(0.0001, time);
+      g.gain.linearRampToValueAtTime(0.35 * v, time + 0.003);
+      g.gain.exponentialRampToValueAtTime(0.0001, time + decay);
+      src.start(time); src.stop(time + decay + 0.05);
+    }
+    function fireBass(time, semi) {
+      const f = BASE_FREQ * Math.pow(2, semi / 12);
+      audio.lead.frequency.setValueAtTime(f, time);
+      audio.sub.frequency.setValueAtTime(f / 2, time);
+      const g = audio.bassEnv.gain;
+      // hold-then-ramp instead of snapping to zero: retriggering mid-decay
+      // used to jump the gain instantly, which clicked on every note
+      if (g.cancelAndHoldAtTime) g.cancelAndHoldAtTime(time);
+      else { g.cancelScheduledValues(time); g.setValueAtTime(0.0001, time); }
+      g.linearRampToValueAtTime(1, time + 0.015);
+      g.setTargetAtTime(0.0001, time + 0.015, STEP_SEC * 0.55);
     }
     function scheduleBeats() {
-      const now = audio.ctx.currentTime, lookahead = 0.12;
-      while (audio.nextKick < now + lookahead) { fireKick(audio.nextKick); audio.nextKick += BEAT_SEC; }
-      while (audio.nextHat < now + lookahead) { fireHat(audio.nextHat); audio.nextHat += BEAT_SEC / 2; }
+      if (!audio.enabled) return;
+      // generous lookahead: this used to be 0.12s and only ran from the
+      // render loop, so any hand-tracking frame hitch made hits land late
+      // or drop entirely — that was the choppiness
+      const now = audio.ctx.currentTime, lookahead = 0.35;
+      while (audio.nextStep < now + lookahead) {
+        const t = audio.nextStep, s = audio.step % 16;
+        if (PAT.kick[s]) fireKick(t, PAT.kick[s]);
+        if (PAT.snare[s]) fireSnare(t, PAT.snare[s]);
+        if (PAT.hat[s]) fireHat(t, PAT.hat[s], false);
+        if (PAT.ohat[s]) fireHat(t, PAT.ohat[s], true);
+        if (PAT.bass[s] !== null) fireBass(t, PAT.bass[s]);
+        audio.step++;
+        audio.nextStep += STEP_SEC;
+      }
     }
 
     function updateAudio(dt) {
@@ -1074,18 +1145,14 @@
       const now = ctx.currentTime;
       const RAMP = 0.06;
 
-      audio.master.gain.setTargetAtTime(0.22, now, RAMP);
+      audio.master.gain.setTargetAtTime(0.3, now, RAMP);
 
-      const freq = noteFreqFromOpenness(state.openness);
-      audio.lead.frequency.setTargetAtTime(freq, now, 0.09);
-      audio.sub.frequency.setTargetAtTime(freq / 2, now, 0.09);
-
-      // brightness rises with openness
+      // brightness of the bassline rises with openness
       audio.brightness.frequency.setTargetAtTime(300 + state.openness * 3200, now, RAMP);
 
       // held tilt maps straight to effect depth: negative handAngle is a
       // clockwise tilt (fingertips toward the user's right) → vibrato;
-      // positive is counter-clockwise → echo. Full depth at the ±45° cap.
+      // positive is counter-clockwise → echo. Full depth at the ±70° cap.
       const tilt = state.handAngle / MAX_HAND_ANGLE; // -1 (CW) … +1 (CCW)
       const cwAmt = THREE.MathUtils.clamp(-tilt, 0, 1);
       const ccwAmt = THREE.MathUtils.clamp(tilt, 0, 1);
@@ -1104,9 +1171,10 @@
       // formant color follows hand height
       audio.formant.frequency.setTargetAtTime(500 + THREE.MathUtils.clamp(state.ty, -1, 2) * 900, now, RAMP);
 
-      // grip sweeps a highpass filter across the always-on pad/beat loop —
-      // closed fist thins it out, open hand restores full body
-      audio.beatHP.frequency.setTargetAtTime(20 + (1 - state.openness) * 4000, now, RAMP);
+      // grip sweeps the mix-wide lowpass — exponential mapping so the sweep
+      // feels even across the range: fist ≈ 160 Hz (deep, muffled, all bass
+      // and kick), open ≈ 12 kHz (everything back in)
+      audio.gripLP.frequency.setTargetAtTime(160 * Math.pow(12000 / 160, state.openness), now, RAMP);
       scheduleBeats();
 
       // fast open/close snap → percussive pluck
@@ -1123,12 +1191,17 @@
       if (!audio.enabled) {
         initAudio();
         if (audio.ctx.state === 'suspended') audio.ctx.resume();
-        audio.nextKick = audio.nextHat = audio.ctx.currentTime + 0.05;
+        audio.nextStep = audio.ctx.currentTime + 0.05;
+        audio.step = 0;
         audio.enabled = true;
+        // dedicated timer keeps the groove fed even when the render loop
+        // hitches under hand-tracking load
+        audio.beatTimer = setInterval(scheduleBeats, 90);
         $('btn-sound').textContent = 'SOUND ON';
         $('btn-sound').classList.remove('ghost');
       } else {
         audio.enabled = false;
+        clearInterval(audio.beatTimer);
         if (audio.master) audio.master.gain.setTargetAtTime(0.0001, audio.ctx.currentTime, 0.08);
         sphereUniforms.uVibrato.value = 0;
         $('btn-sound').textContent = 'SOUND OFF';
@@ -1294,7 +1367,11 @@
     const POSITION_DEADZONE = 0.055; // scene units; ignores stationary-hand tremor
     const ORIENTATION_WINDOW = 7;
     const ORIENTATION_DEADZONE = THREE.MathUtils.degToRad(3);
-    const MAX_HAND_ANGLE = THREE.MathUtils.degToRad(45); // tilt cap either side of finger-up
+    const MAX_HAND_ANGLE = THREE.MathUtils.degToRad(70); // tilt cap either side of finger-up
+    // The wrist→middle-MCP landmark line under-rotates vs perceived hand tilt
+    // (the wrist landmark sits partly in the forearm): a real ~90° tilt
+    // measures ~70°. Empirical gain calibrated so the meter reads true tilt.
+    const ORIENTATION_GAIN = 90 / 70;
     const ORIENTATION_RESPONSE = 7;
     function median3(a) {
       if (a.length < 3) return a[a.length - 1];
@@ -1325,7 +1402,12 @@
        Circular averaging handles the -PI/PI seam; the dead zone prevents a still
        hand from continually changing the target. */
     function feedHandOrientation(lm) {
-      const dx = lm[0].x - lm[9].x; // mirrored screen-space X
+      // landmarks are normalized per-axis (x by frame width, y by height), so
+      // on a non-square feed the raw deltas distort the angle — rescale x by
+      // the video aspect to get true geometric tilt (4:3 read ~25% shallow)
+      const video = $('cam-video');
+      const aspect = (video.videoWidth || 4) / (video.videoHeight || 3);
+      const dx = (lm[0].x - lm[9].x) * aspect; // mirrored screen-space X
       const dy = lm[9].y - lm[0].y; // screen-space Y points downward
       const raw = Math.atan2(-dx, -dy);
       state.rawHandAngle = raw;
@@ -1337,9 +1419,9 @@
         sinSum += Math.sin(angle);
         cosSum += Math.cos(angle);
       }
-      // cap the usable tilt range at ±45° from finger-up (12 o'clock) —
-      // atan2 already returns (-PI, PI], so a plain clamp is safe here
-      const limited = THREE.MathUtils.clamp(Math.atan2(sinSum, cosSum), -MAX_HAND_ANGLE, MAX_HAND_ANGLE);
+      // apply the anatomical calibration gain, then cap the usable tilt range
+      // at ±MAX_HAND_ANGLE from finger-up (12 o'clock)
+      const limited = THREE.MathUtils.clamp(Math.atan2(sinSum, cosSum) * ORIENTATION_GAIN, -MAX_HAND_ANGLE, MAX_HAND_ANGLE);
       if (!state.hasOrientation) {
         state.targetHandAngle = limited;
         state.hasOrientation = true;
@@ -1356,7 +1438,7 @@
     }
 
     /* ----- bottom-left HUD: live hand X/Y and rotation bar ----- */
-    const ROT_BAR_MAX_DEG = 45;
+    const ROT_BAR_MAX_DEG = 70; // keep in sync with MAX_HAND_ANGLE and the tick labels
     function updateMotionHUD() {
       $('pos-x-val').textContent = state.tx.toFixed(2);
       $('pos-y-val').textContent = state.ty.toFixed(2);
