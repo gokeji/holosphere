@@ -2018,6 +2018,11 @@
     /* ----- debug readout (press D): raw metric for calibration ----- */
     let debugOn = false, dbgLogTimer = 0;
     addEventListener('keydown', e => {
+      if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
+        toggleAudio();
+        return;
+      }
       if (e.key === 'd' || e.key === 'D') {
         debugOn = !debugOn;
         $('debug').classList.toggle('on', debugOn);
