@@ -1641,8 +1641,10 @@
         echoGhosts[i].visible = echoVal > i / ECHO_VISUAL_TAPS;
       }
 
-      // pan follows left/right hand position
-      audio.panner.pan.setTargetAtTime(THREE.MathUtils.clamp(state.tx / 3, -1, 1), now, RAMP);
+      // pan follows left/right position — normalize by input span so hand
+      // (±HAND_X_EXTENT) and mouse (±MOUSE_X_EXTENT) both reach full stereo
+      const panSpan = (state.mode === 'gesture' && state.hasHand) ? HAND_X_EXTENT : MOUSE_X_EXTENT;
+      audio.panner.pan.setTargetAtTime(THREE.MathUtils.clamp(state.tx / panSpan, -1, 1), now, RAMP);
 
       // formant color follows hand height
       audio.formant.frequency.setTargetAtTime(500 + THREE.MathUtils.clamp(state.ty, -1, 2) * 900, now, RAMP);
@@ -1879,6 +1881,13 @@
     const filt = { open: [], px: [], py: [], pz: [], tx: null, ty: null, tz: null, orientation: [] };
     const POSITION_WINDOW = 5;
     const POSITION_DEADZONE = 0.055; // scene units; ignores stationary-hand tremor
+    // Scene-space extents for stereo pan normalization. Mouse maps the full
+    // viewport to ±MOUSE_X_EXTENT; hand palm-centre only reaches ±HAND_X_EXTENT
+    // (see tracking push below), so pan must use the matching span or gesture
+    // mode stays stuck near centre.
+    const HAND_X_SCALE = 2.4;
+    const HAND_X_EXTENT = HAND_X_SCALE / 2; // ±1.2
+    const MOUSE_X_EXTENT = 3.0;             // mouse: (nx-0.5)*6 → ±3
     // Apparent palm size → Z depth. Bigger hand (closer to camera) → toward camera
     // (negative Z). Palm width (index→pinky MCP) is stable across fist/open.
     const SIZE_DEF = { lo: 0.08, hi: 0.28 };
@@ -2131,7 +2140,7 @@
             // removes landmark tremor when the hand is still.
             const cx = (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x) / 5;
             const cy = (lm[0].y + lm[5].y + lm[9].y + lm[13].y + lm[17].y) / 5;
-            filt.px.push((0.5 - cx) * 2.4);
+            filt.px.push((0.5 - cx) * HAND_X_SCALE);
             filt.py.push((0.5 - cy) * 1.7 + 0.55);
             filt.pz.push(mapHandDepth(handSpan(lm)));
             if (filt.px.length > POSITION_WINDOW) filt.px.shift();
@@ -2178,7 +2187,7 @@
     }
     addEventListener('mousemove', e => {
       if (state.mode !== 'mouse' && !(state.mode === 'gesture' && !state.hasHand)) return;
-      state.tx = (e.clientX / innerWidth - 0.5) * 6.0;
+      state.tx = (e.clientX / innerWidth - 0.5) * (MOUSE_X_EXTENT * 2);
       state.ty = (0.5 - e.clientY / innerHeight) * 4.0 + 0.55;
     });
     addEventListener('mousedown', () => { if (state.mode === 'mouse') state.targetOpen = 0; });
