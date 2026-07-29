@@ -197,22 +197,23 @@
     #hud-bl {
       bottom: 26px;
       left: 26px;
-      width: 230px
+      width: 240px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px
     }
 
     #hud-motion {
-      bottom: 128px;
-      left: 26px;
-      width: 280px
+      width: 100%
     }
 
     #hud-motion .row {
       display: flex;
       justify-content: space-between;
-      margin-top: 4px
+      gap: 8px
     }
 
-    #rot-bar {
+    .meter-bar {
       margin-top: 6px;
       height: 8px;
       border: 1px solid rgba(75, 232, 255, .35);
@@ -238,14 +239,6 @@
       box-shadow: 0 0 12px var(--cyan-dim);
     }
 
-    #ap-bar {
-      margin-top: 6px;
-      height: 8px;
-      border: 1px solid rgba(75, 232, 255, .35);
-      position: relative;
-      overflow: hidden
-    }
-
     #ap-fill {
       position: absolute;
       inset: 1px auto 1px 1px;
@@ -255,8 +248,7 @@
       transition: width .08s linear
     }
 
-    #ap-ticks,
-    #rot-ticks {
+    .meter-ticks {
       display: flex;
       justify-content: space-between;
       font-size: 9px;
@@ -287,6 +279,10 @@
 
     #hud-motion .rot-label {
       margin-top: 8px
+    }
+
+    #hud-aperture {
+      width: 100%
     }
 
     #hud-br {
@@ -457,15 +453,11 @@
       letter-spacing: .15em
     }
 
-    /* manual slider (fallback) */
+    /* manual slider (fallback) — only in layout when .on */
     #manual {
-      position: fixed;
-      bottom: 64px;
-      left: 26px;
-      z-index: 10;
       display: none;
-      align-items: center;
-      gap: 10px;
+      width: 100%;
+      flex-direction: column;
       pointer-events: auto
     }
 
@@ -474,14 +466,10 @@
     }
 
     #manual input {
-      width: 180px;
+      width: 100%;
+      margin-top: 6px;
+      height: 8px;
       accent-color: var(--cyan)
-    }
-
-    #manual span {
-      font-size: 10px;
-      opacity: .55;
-      letter-spacing: .15em
     }
 
     #btn-sound {
@@ -648,30 +636,37 @@
 
   <button class="btn ghost" id="btn-sound" type="button">SOUND OFF</button>
 
-  <div class="hud" id="hud-motion">
-    <div class="row">
-      <span class="lbl">POS X <span id="pos-x-val" class="val">0.00</span></span>
-      <span class="lbl">POS Y <span id="pos-y-val" class="val">0.00</span></span>
-      <span class="lbl">POS Z <span id="pos-z-val" class="val">0.00</span></span>
-    </div>
-    <div class="lbl rot-label">ROTATION <span id="rot-deg-val" class="val right">0.0°</span></div>
-    <div id="rot-bar">
-      <div id="rot-center"></div>
-      <div id="rot-fill"></div>
-    </div>
-    <div id="rot-ticks"><span>-70°</span><span>0°</span><span>+70°</span></div>
-    <div class="lbl trem-label" id="trem-label">
-      <span>TREMOLO <span id="trem-hz-val" class="val">—</span></span>
-      <span id="trem-depth-val" class="val">DEPTH —</span>
-    </div>
-  </div>
-
   <div class="hud" id="hud-bl">
-    <div class="lbl">APERTURE <span id="ap-val" class="val" style="float:right">—</span></div>
-    <div id="ap-bar">
-      <div id="ap-fill"></div>
+    <div id="hud-motion">
+      <div class="row">
+        <span class="lbl">POS X <span id="pos-x-val" class="val">0.00</span></span>
+        <span class="lbl">POS Y <span id="pos-y-val" class="val">0.00</span></span>
+        <span class="lbl">POS Z <span id="pos-z-val" class="val">0.00</span></span>
+      </div>
+      <div class="lbl rot-label">ROTATION <span id="rot-deg-val" class="val right">0.0°</span></div>
+      <div class="meter-bar" id="rot-bar">
+        <div id="rot-center"></div>
+        <div id="rot-fill"></div>
+      </div>
+      <div class="meter-ticks" id="rot-ticks"><span>-70°</span><span>0°</span><span>+70°</span></div>
+      <div class="lbl trem-label" id="trem-label">
+        <span>TREMOLO <span id="trem-hz-val" class="val">—</span></span>
+        <span id="trem-depth-val" class="val">DEPTH —</span>
+      </div>
     </div>
-    <div id="ap-ticks"><span>FIST</span><span>50</span><span>OPEN</span></div>
+
+    <div id="manual">
+      <span class="lbl">MANUAL APERTURE</span>
+      <input type="range" id="manual-slider" min="0" max="100" value="55">
+    </div>
+
+    <div id="hud-aperture">
+      <div class="lbl">APERTURE <span id="ap-val" class="val" style="float:right">—</span></div>
+      <div class="meter-bar" id="ap-bar">
+        <div id="ap-fill"></div>
+      </div>
+      <div class="meter-ticks" id="ap-ticks"><span>FIST</span><span>50</span><span>OPEN</span></div>
+    </div>
   </div>
 
   <div class="hud" id="hud-br">
@@ -684,11 +679,6 @@
     <video id="cam-video" playsinline muted></video>
     <canvas id="cam-overlay"></canvas>
     <div class="tag">OPTICAL FEED 01</div>
-  </div>
-
-  <div id="manual">
-    <span>MANUAL APERTURE</span>
-    <input type="range" id="manual-slider" min="0" max="100" value="55">
   </div>
 
   <div id="track-rack"></div>
