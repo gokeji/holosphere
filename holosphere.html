@@ -1090,7 +1090,7 @@
        Rotation   → held tilt angle (capped ±70°, middle finger up = 0°,
                     ±5° deadzone with no tilt effects). Clockwise / right =
                     vibrato + tremolo; counter-clockwise / left = echo only.
-       Position   → tx = stereo pan, ty = formant/color filter
+       Position   → tx = stereo pan, ty = mix-wide formant/wah color
                     (rightward travel also charges tremolo depth)
        ============================================================ */
     const audio = {
@@ -1280,17 +1280,20 @@
       // spectrum back in. Slight resonance so the sweep itself sounds alive.
       const gripLP = ctx.createBiquadFilter();
       gripLP.type = 'lowpass'; gripLP.frequency.value = 12000; gripLP.Q.value = 1.1;
-      gripLP.connect(panner);
 
-      // formant/color filter — driven by hand height (ty)
+      // formant/wah color — driven by hand/mouse height (ty). Sits AFTER
+      // gripLP so it colors the whole mix (drums, melody, pad, bass), not
+      // just the bassline. Peaking + higher Q makes vertical motion a clear
+      // "vowel"/wah shift rather than a subtle EQ nudge.
       const formant = ctx.createBiquadFilter();
-      formant.type = 'peaking'; formant.frequency.value = 1200; formant.Q.value = 0.9; formant.gain.value = 4;
-      formant.connect(gripLP);
+      formant.type = 'peaking'; formant.frequency.value = 1200; formant.Q.value = 3.2; formant.gain.value = 8;
+      gripLP.connect(formant);
+      formant.connect(panner);
 
-      // brightness filter — driven by openness
+      // brightness filter — driven by openness (bassline only)
       const brightness = ctx.createBiquadFilter();
       brightness.type = 'lowpass'; brightness.frequency.value = 800; brightness.Q.value = 0.7;
-      brightness.connect(formant);
+      brightness.connect(gripLP);
 
       // two detuned voices form the bassline instrument — always-running
       // oscillators gated by a shared envelope that the step sequencer
@@ -1646,8 +1649,14 @@
       const panSpan = (state.mode === 'gesture' && state.hasHand) ? HAND_X_EXTENT : MOUSE_X_EXTENT;
       audio.panner.pan.setTargetAtTime(THREE.MathUtils.clamp(state.tx / panSpan, -1, 1), now, RAMP);
 
-      // formant color follows hand height
-      audio.formant.frequency.setTargetAtTime(500 + THREE.MathUtils.clamp(state.ty, -1, 2) * 900, now, RAMP);
+      // formant/wah follows height — same span-normalize idea as pan so hand
+      // (±HAND_Y_EXTENT) and mouse (±MOUSE_Y_EXTENT) both sweep the full
+      // vowel range. Exponential map: bottom = chesty (~350 Hz), top = bright
+      // nasal (~3.2 kHz).
+      const ySpan = (state.mode === 'gesture' && state.hasHand) ? HAND_Y_EXTENT : MOUSE_Y_EXTENT;
+      const yNorm = THREE.MathUtils.clamp((state.ty - Y_CENTER) / ySpan, -1, 1);
+      const formantHz = 350 * Math.pow(3200 / 350, (yNorm + 1) / 2);
+      audio.formant.frequency.setTargetAtTime(formantHz, now, RAMP);
 
       // grip sweeps the mix-wide lowpass — exponential mapping so the sweep
       // feels even across the range: fist ≈ 160 Hz (deep, muffled, all bass
@@ -1881,13 +1890,17 @@
     const filt = { open: [], px: [], py: [], pz: [], tx: null, ty: null, tz: null, orientation: [] };
     const POSITION_WINDOW = 5;
     const POSITION_DEADZONE = 0.055; // scene units; ignores stationary-hand tremor
-    // Scene-space extents for stereo pan normalization. Mouse maps the full
-    // viewport to ±MOUSE_X_EXTENT; hand palm-centre only reaches ±HAND_X_EXTENT
-    // (see tracking push below), so pan must use the matching span or gesture
-    // mode stays stuck near centre.
+    // Scene-space extents for stereo pan / formant normalization. Mouse maps
+    // the full viewport to ±MOUSE_*_EXTENT; hand palm-centre only reaches the
+    // HAND_* spans (see tracking push below), so audio must use the matching
+    // span or gesture mode stays stuck near the centre of each axis.
     const HAND_X_SCALE = 2.4;
     const HAND_X_EXTENT = HAND_X_SCALE / 2; // ±1.2
     const MOUSE_X_EXTENT = 3.0;             // mouse: (nx-0.5)*6 → ±3
+    const Y_CENTER = 0.55;                 // rest height (matches sphere default)
+    const HAND_Y_SCALE = 1.7;
+    const HAND_Y_EXTENT = HAND_Y_SCALE / 2; // ±0.85
+    const MOUSE_Y_EXTENT = 2.0;             // mouse: (0.5-ny)*4 → ±2
     // Apparent palm size → Z depth. Bigger hand (closer to camera) → toward camera
     // (negative Z). Palm width (index→pinky MCP) is stable across fist/open.
     const SIZE_DEF = { lo: 0.08, hi: 0.28 };
@@ -2141,7 +2154,7 @@
             const cx = (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x) / 5;
             const cy = (lm[0].y + lm[5].y + lm[9].y + lm[13].y + lm[17].y) / 5;
             filt.px.push((0.5 - cx) * HAND_X_SCALE);
-            filt.py.push((0.5 - cy) * 1.7 + 0.55);
+            filt.py.push((0.5 - cy) * HAND_Y_SCALE + Y_CENTER);
             filt.pz.push(mapHandDepth(handSpan(lm)));
             if (filt.px.length > POSITION_WINDOW) filt.px.shift();
             if (filt.py.length > POSITION_WINDOW) filt.py.shift();
@@ -2188,7 +2201,7 @@
     addEventListener('mousemove', e => {
       if (state.mode !== 'mouse' && !(state.mode === 'gesture' && !state.hasHand)) return;
       state.tx = (e.clientX / innerWidth - 0.5) * (MOUSE_X_EXTENT * 2);
-      state.ty = (0.5 - e.clientY / innerHeight) * 4.0 + 0.55;
+      state.ty = (0.5 - e.clientY / innerHeight) * (MOUSE_Y_EXTENT * 2) + Y_CENTER;
     });
     addEventListener('mousedown', () => { if (state.mode === 'mouse') state.targetOpen = 0; });
     addEventListener('mouseup', () => { if (state.mode === 'mouse') state.targetOpen = $('manual-slider').value / 100; });
