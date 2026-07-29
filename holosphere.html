@@ -203,7 +203,7 @@
     #hud-motion {
       bottom: 128px;
       left: 26px;
-      width: 230px
+      width: 280px
     }
 
     #hud-motion .row {
@@ -652,6 +652,7 @@
     <div class="row">
       <span class="lbl">POS X <span id="pos-x-val" class="val">0.00</span></span>
       <span class="lbl">POS Y <span id="pos-y-val" class="val">0.00</span></span>
+      <span class="lbl">POS Z <span id="pos-z-val" class="val">0.00</span></span>
     </div>
     <div class="lbl rot-label">ROTATION <span id="rot-deg-val" class="val right">0.0°</span></div>
     <div id="rot-bar">
@@ -700,7 +701,8 @@
     <p>
       Gesture-controlled volumetric projection.<br><br>
       Open your hand to expand the sphere &mdash; close your fist to collapse it into the core.
-      Move your hand to steer the projection. Camera runs locally; nothing leaves your device.
+      Move your hand to steer the projection; closer / farther drives depth.
+      Camera runs locally; nothing leaves your device.
     </p>
     <button class="btn" id="btn-start">Initialize hand tracking</button>
     <button class="btn ghost" id="btn-mouse">Continue without camera</button>
@@ -1077,7 +1079,7 @@
        ============================================================ */
     const state = {
       openness: 0.55, targetOpen: 0.55,
-      tx: 0, ty: 0.55,          // target sphere position
+      tx: 0, ty: 0.55, tz: 0,  // target sphere position (tz from hand distance / apparent size)
       hasHand: false, mode: 'standby',
       radius: 1.4, radiusVel: 0,
       openVel: 0,
@@ -1884,9 +1886,15 @@
        MediaPipe landmarks jitter frame-to-frame. Openness uses a short median;
        position uses a longer window plus a dead zone, so the sphere only responds
        after a hand displacement persists across several tracking frames. */
-    const filt = { open: [], px: [], py: [], tx: null, ty: null, orientation: [] };
+    const filt = { open: [], px: [], py: [], pz: [], tx: null, ty: null, tz: null, orientation: [] };
     const POSITION_WINDOW = 5;
     const POSITION_DEADZONE = 0.055; // scene units; ignores stationary-hand tremor
+    // Apparent palm size → Z depth. Bigger hand (closer to camera) → toward camera
+    // (negative Z). Palm width (index→pinky MCP) is stable across fist/open.
+    const SIZE_DEF = { lo: 0.08, hi: 0.28 };
+    const sizeCal = { lo: SIZE_DEF.lo, hi: SIZE_DEF.hi };
+    const Z_NEAR = -2.8; // hand filling the frame — sphere toward camera
+    const Z_FAR = 3.2;   // hand far / small — sphere deeper into the scene
     const ORIENTATION_WINDOW = 7;
     const ORIENTATION_DEADZONE = THREE.MathUtils.degToRad(3);
     const MAX_HAND_ANGLE = THREE.MathUtils.degToRad(70); // tilt cap either side of finger-up
@@ -1909,11 +1917,30 @@
       return Math.atan2(Math.sin(to - from), Math.cos(to - from));
     }
     function resetFilters() {
-      filt.open.length = 0; filt.px.length = 0; filt.py.length = 0; filt.orientation.length = 0;
-      filt.tx = null; filt.ty = null;
+      filt.open.length = 0; filt.px.length = 0; filt.py.length = 0; filt.pz.length = 0; filt.orientation.length = 0;
+      filt.tx = null; filt.ty = null; filt.tz = null;
       state.openVel = 0;
       state.hasOrientation = false;
       state.targetHandAngle = state.handAngle;
+    }
+
+    /* Palm width in aspect-corrected image space — proxy for camera distance.
+       Index MCP (5) → pinky MCP (17) barely changes with fist openness, so Z
+       tracking stays independent of aperture. */
+    function handSpan(lm) {
+      const video = $('cam-video');
+      const aspect = (video.videoWidth || 4) / (video.videoHeight || 3);
+      const dx = (lm[5].x - lm[17].x) * aspect;
+      const dy = lm[5].y - lm[17].y;
+      return Math.hypot(dx, dy);
+    }
+    function mapHandDepth(span) {
+      if (span < sizeCal.lo) sizeCal.lo += (span - sizeCal.lo) * 0.45;
+      if (span > sizeCal.hi) sizeCal.hi += (span - sizeCal.hi) * 0.45;
+      sizeCal.lo += (SIZE_DEF.lo - sizeCal.lo) * 0.001;
+      sizeCal.hi += (SIZE_DEF.hi - sizeCal.hi) * 0.001;
+      const t = THREE.MathUtils.clamp((span - sizeCal.lo) / Math.max(sizeCal.hi - sizeCal.lo, 1e-4), 0, 1);
+      return THREE.MathUtils.lerp(Z_FAR, Z_NEAR, t);
     }
 
     /* ----- screen-relative hand direction → absolute Z orientation -----
@@ -1964,6 +1991,7 @@
     function updateMotionHUD() {
       $('pos-x-val').textContent = state.tx.toFixed(2);
       $('pos-y-val').textContent = state.ty.toFixed(2);
+      $('pos-z-val').textContent = state.tz.toFixed(2);
 
       // shown clockwise-positive: CW tilt reads +° and fills rightward,
       // CCW tilt reads -° and fills leftward (handAngle itself is CCW-positive)
@@ -2008,7 +2036,7 @@
       $('debug').textContent =
         `EXT ${dbg.ext.toFixed(3)}  →  LIN ${dbg.lin.toFixed(3)}  →  OPEN ${dbg.open.toFixed(3)}   (auto-cal ${cal.lo.toFixed(3)}–${cal.hi.toFixed(3)})\n` +
         `per-finger [idx mid rng pnk]  ${p}\n` +
-        `position ${sphere.position.x.toFixed(3)},${sphere.position.y.toFixed(3)} @ ${state.motion.positionSpeed.toFixed(3)}/s   Z orientation ${THREE.MathUtils.radToDeg(state.handAngle).toFixed(1)}° → ${THREE.MathUtils.radToDeg(state.targetHandAngle).toFixed(1)}°\n` +
+        `position ${sphere.position.x.toFixed(3)},${sphere.position.y.toFixed(3)},${sphere.position.z.toFixed(3)} @ ${state.motion.positionSpeed.toFixed(3)}/s   Z orientation ${THREE.MathUtils.radToDeg(state.handAngle).toFixed(1)}° → ${THREE.MathUtils.radToDeg(state.targetHandAngle).toFixed(1)}°\n` +
         `Z follow ${state.motion.zOrientationSpeed.toFixed(3)} rad/s   natural Y ${state.motion.naturalYSpeed.toFixed(3)} rad/s   total ${state.motion.sphereRotationSpeed.toFixed(3)} rad/s\n` +
         `audio  motion ${audio.motion.toFixed(3)}   tremR ${audio.motionRight.toFixed(3)}   trem ${Math.round(audio.tremBpm)}bpm depth ${(audio.tremDepthAmt * 100).toFixed(0)}%${audio.tremTest ? '  [TEST]' : ''}`;
       dbgLogTimer -= dt;
@@ -2018,8 +2046,9 @@
           ext: +dbg.ext.toFixed(4), open: +dbg.open.toFixed(4),
           cal: [+cal.lo.toFixed(4), +cal.hi.toFixed(4)],
           fingers: dbg.per.map(v => +v.toFixed(4)),
-          position: [+sphere.position.x.toFixed(4), +sphere.position.y.toFixed(4)],
-          target: [+state.tx.toFixed(4), +state.ty.toFixed(4)],
+          position: [+sphere.position.x.toFixed(4), +sphere.position.y.toFixed(4), +sphere.position.z.toFixed(4)],
+          target: [+state.tx.toFixed(4), +state.ty.toFixed(4), +state.tz.toFixed(4)],
+          sizeCal: [+sizeCal.lo.toFixed(4), +sizeCal.hi.toFixed(4)],
           orientation: {
             rawDegrees: +THREE.MathUtils.radToDeg(state.rawHandAngle).toFixed(2),
             targetDegrees: +THREE.MathUtils.radToDeg(state.targetHandAngle).toFixed(2),
@@ -2102,21 +2131,26 @@
             state.targetOpen = ema(filt.open.length > 1 ? state.targetOpen : null, open, 0.5 * rotGate);
             // grip-change speed (per tracking frame), used to gate orientation
             state.openVel = ema(state.openVel, Math.abs(state.targetOpen - pOpen), 0.35);
-            // Palm centre drives position. Use a five-frame median then a slow
-            // blend, and retain the last target inside a small dead zone. This
-            // removes the natural landmark tremor visible with a still hand.
+            // Palm centre drives XY; apparent palm width drives Z (closer =
+            // bigger → toward camera). Five-frame median + EMA + dead zone
+            // removes landmark tremor when the hand is still.
             const cx = (lm[0].x + lm[5].x + lm[9].x + lm[13].x + lm[17].x) / 5;
             const cy = (lm[0].y + lm[5].y + lm[9].y + lm[13].y + lm[17].y) / 5;
             filt.px.push((0.5 - cx) * 2.4);
             filt.py.push((0.5 - cy) * 1.7 + 0.55);
+            filt.pz.push(mapHandDepth(handSpan(lm)));
             if (filt.px.length > POSITION_WINDOW) filt.px.shift();
             if (filt.py.length > POSITION_WINDOW) filt.py.shift();
+            if (filt.pz.length > POSITION_WINDOW) filt.pz.shift();
             filt.tx = ema(filt.tx, median(filt.px), 0.28);
             filt.ty = ema(filt.ty, median(filt.py), 0.28);
+            filt.tz = ema(filt.tz, median(filt.pz), 0.28);
             if (Math.abs(filt.tx - state.tx) > POSITION_DEADZONE)
               state.tx += (filt.tx - state.tx) * 0.45;
             if (Math.abs(filt.ty - state.ty) > POSITION_DEADZONE)
               state.ty += (filt.ty - state.ty) * 0.45;
+            if (Math.abs(filt.tz - state.tz) > POSITION_DEADZONE)
+              state.tz += (filt.tz - state.tz) * 0.45;
             // absolute screen-relative pointing direction → sphere Z orientation
             feedHandOrientation(lm);
             drawHand(lm);
@@ -2205,9 +2239,10 @@
       }
       prevOpen += (state.targetOpen - prevOpen) * Math.min(1, dt * 4);
 
-      /* position follows hand, gentle lag */
+      /* position follows hand, gentle lag (XY + depth from apparent size) */
       sphere.position.x += (state.tx - sphere.position.x) * Math.min(1, dt * 6);
       sphere.position.y += (state.ty - sphere.position.y) * Math.min(1, dt * 6);
+      sphere.position.z += (state.tz - sphere.position.z) * Math.min(1, dt * 6);
 
       /* Hand direction controls world-space Z; natural Y spin stays independent. */
       const naturalYSpeed = 0.22 * (reduceMotion ? 0.4 : 1);
