@@ -772,6 +772,8 @@
       uEchoTap: { value: 0 },     // 0 = live particle; 1+ = delayed ghost copies
       uEchoTaps: { value: 12 },   // total clones at full strength (matches ECHO_VISUAL_TAPS)
       uPulse: { value: 0 },
+      // Hand/mouse edge bias — XY in [-1,1]; stretches the near side into an oblong
+      uPull: { value: new THREE.Vector2(0, 0) },
       uPixel: { value: Math.min(devicePixelRatio, 2) },
       uColA: { value: COL_CYAN },
       uColB: { value: COL_VIOLET },
@@ -784,6 +786,7 @@
     uniform float uTime, uRadius, uChaos, uChaosAngle, uVibrato, uVibratoFreq;
     uniform float uVibratoAmp, uVibratoCurve, uTremPhase;
     uniform float uEcho, uEchoDelay, uEchoTap, uEchoTaps, uPulse, uPixel;
+    uniform vec2 uPull;
     varying float vSeed, vShade, vShell, vCond, vEcho;
 
     // Full particle path at time t — orbit, waves, breathing, vibrato, etc.
@@ -864,7 +867,30 @@
         pos -= vel * echoDt;
       }
 
-      vec4 mv = modelViewMatrix * vec4(pos, 1.0);
+      // Hand edge → oblong bulge in world XY (screen-locked, scales with radius).
+      // Near-side particles protrude; far side stays put / slightly compresses.
+      vec4 wp = modelMatrix * vec4(pos, 1.0);
+      vec3 origin = (modelMatrix * vec4(0.0, 0.0, 0.0, 1.0)).xyz;
+      vec3 off = wp.xyz - origin;
+      float pullMag = length(uPull);
+      if(pullMag > 1e-4){
+        vec2 pullDir = uPull / pullMag;
+        float radial = length(off.xy);
+        float hemi = radial > 1e-4
+          ? max(dot(off.xy / radial, pullDir), 0.0)
+          : 0.0;
+        // Fade while condensed so the tug doesn't fight fist geometry
+        float live = mix(1.0, 0.35, smoothstep(0.45, 0.95, uChaos));
+        float amt = pullMag * live;
+        // Asymmetric stretch: near hemisphere elongates, far side gently squashes
+        float stretch = 1.0 + hemi * amt * 0.38 - (1.0 - hemi) * amt * 0.10;
+        off.xy *= stretch;
+        // Bias the whole cloud slightly toward the hand for a pulled silhouette
+        off.xy += pullDir * radial * amt * 0.12;
+        wp.xyz = origin + off;
+      }
+
+      vec4 mv = viewMatrix * wp;
       gl_Position = projectionMatrix * mv;
 
       float k = smoothstep(0.45, 0.95, uChaos);
@@ -2266,6 +2292,15 @@
       sphere.position.x += (state.tx - sphere.position.x) * Math.min(1, dt * 6);
       sphere.position.y += (state.ty - sphere.position.y) * Math.min(1, dt * 6);
       sphere.position.z += (state.tz - sphere.position.z) * Math.min(1, dt * 6);
+
+      /* Edge bias → oblong bulge: center = round, screen edge = max protrusion */
+      const pullXSpan = (state.mode === 'gesture' && state.hasHand) ? HAND_X_EXTENT : MOUSE_X_EXTENT;
+      const pullYSpan = (state.mode === 'gesture' && state.hasHand) ? HAND_Y_EXTENT : MOUSE_Y_EXTENT;
+      const pullTx = THREE.MathUtils.clamp(state.tx / pullXSpan, -1, 1);
+      const pullTy = THREE.MathUtils.clamp((state.ty - Y_CENTER) / pullYSpan, -1, 1);
+      const pullU = sphereUniforms.uPull.value;
+      pullU.x += (pullTx - pullU.x) * Math.min(1, dt * 8);
+      pullU.y += (pullTy - pullU.y) * Math.min(1, dt * 8);
 
       /* Hand direction controls world-space Z; natural Y spin stays independent. */
       const naturalYSpeed = 0.22 * (reduceMotion ? 0.4 : 1);
