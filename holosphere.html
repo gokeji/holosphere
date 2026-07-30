@@ -197,48 +197,199 @@
     #hud-bl {
       bottom: 26px;
       left: 26px;
-      width: 240px;
+      width: 258px;
       display: flex;
       flex-direction: column;
-      gap: 14px
+      gap: 12px
     }
 
-    #hud-motion {
+    .fx-module {
       width: 100%
     }
 
-    #hud-motion .row {
-      display: flex;
-      justify-content: space-between;
-      gap: 8px
+    .fx-module+.fx-module,
+    #hud-bl #manual.on {
+      border-top: 1px solid rgba(75, 232, 255, .15);
+      padding-top: 10px
     }
 
+    .fx-title {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 10px;
+      opacity: .85
+    }
+
+    .fx-title .val {
+      font-size: 11px
+    }
+
+    .fx-readout {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9px;
+      opacity: .75;
+      margin-top: 4px;
+      letter-spacing: .1em
+    }
+
+    .fx-readout .val {
+      font-size: 10px;
+      letter-spacing: .06em
+    }
+
+    .fx-readout .test .val,
+    .fx-readout.test .val {
+      color: #4bffb4;
+      text-shadow: 0 0 8px rgba(75, 255, 180, .55)
+    }
+
+    /* --- XY pad: position → pan (x) / formant (y) --- */
+    #xy-grid {
+      display: grid;
+      grid-template-columns: 11px 1fr 11px;
+      grid-template-rows: auto 1fr auto;
+      column-gap: 4px;
+      row-gap: 3px;
+      align-items: center;
+      justify-items: center;
+      margin-top: 6px
+    }
+
+    .pad-edge {
+      font-size: 8px;
+      opacity: .5;
+      letter-spacing: .22em;
+      white-space: nowrap
+    }
+
+    .pad-edge.left {
+      grid-area: 2/1;
+      writing-mode: vertical-rl;
+      transform: rotate(180deg)
+    }
+
+    .pad-edge.right {
+      grid-area: 2/3;
+      writing-mode: vertical-rl
+    }
+
+    .pad-edge.top {
+      grid-area: 1/2
+    }
+
+    .pad-edge.bottom {
+      grid-area: 3/2
+    }
+
+    #xy-pad {
+      grid-area: 2/2;
+      width: 100%;
+      height: 96px;
+      position: relative;
+      border: 1px solid rgba(75, 232, 255, .35);
+      background:
+        linear-gradient(rgba(75, 232, 255, .05), transparent 40%),
+        repeating-linear-gradient(0deg, transparent 0 23px, rgba(75, 232, 255, .07) 23px 24px),
+        repeating-linear-gradient(90deg, transparent 0 31px, rgba(75, 232, 255, .07) 31px 32px);
+      overflow: hidden
+    }
+
+    #xy-line-v,
+    #xy-line-h {
+      position: absolute;
+      background: var(--cyan);
+      opacity: .35
+    }
+
+    #xy-line-v {
+      top: 0;
+      bottom: 0;
+      width: 1px;
+      left: 50%
+    }
+
+    #xy-line-h {
+      left: 0;
+      right: 0;
+      height: 1px;
+      top: 50%
+    }
+
+    #xy-dot {
+      position: absolute;
+      width: 9px;
+      height: 9px;
+      margin: -4.5px 0 0 -4.5px;
+      border-radius: 50%;
+      background: var(--cyan);
+      box-shadow: 0 0 10px var(--cyan), 0 0 22px var(--cyan-dim);
+      left: 50%;
+      top: 50%
+    }
+
+    /* --- rotation gauge: CCW → delay / CW → tremolo + detune --- */
     .meter-bar {
       margin-top: 6px;
-      height: 8px;
+      height: 10px;
       border: 1px solid rgba(75, 232, 255, .35);
       position: relative;
       overflow: hidden
     }
 
-    #rot-center {
+    #rot-dead {
       position: absolute;
-      left: 50%;
       top: 0;
       bottom: 0;
-      width: 1px;
-      background: var(--cyan);
-      opacity: .6;
+      left: 46.4%;
+      width: 7.2%;
+      background: rgba(75, 232, 255, .1);
+      border-left: 1px solid rgba(75, 232, 255, .3);
+      border-right: 1px solid rgba(75, 232, 255, .3)
+    }
+
+    #delay-fill {
+      position: absolute;
+      inset: 1px auto 1px auto;
+      background: linear-gradient(90deg, var(--cyan), rgba(75, 232, 255, .25));
+      box-shadow: 0 0 12px var(--cyan-dim)
+    }
+
+    #trem-fill {
+      position: absolute;
+      inset: 1px auto 1px 50%;
+      background: linear-gradient(90deg, rgba(75, 232, 255, .25), var(--cyan));
+      box-shadow: 0 0 12px var(--cyan-dim)
+    }
+
+    #rot-needle {
+      position: absolute;
+      top: -1px;
+      bottom: -1px;
+      width: 2px;
+      margin-left: -1px;
+      left: 50%;
+      background: #eaffff;
+      box-shadow: 0 0 6px var(--cyan);
       z-index: 2
     }
 
-    #rot-fill {
-      position: absolute;
-      inset: 1px auto 1px auto;
-      background: linear-gradient(90deg, rgba(75, 232, 255, .25), var(--cyan));
-      box-shadow: 0 0 12px var(--cyan-dim);
+    .fx-split-lbl {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      font-size: 9px;
+      opacity: .55;
+      letter-spacing: .18em
     }
 
+    .fx-split-lbl .val {
+      font-size: 11px;
+      opacity: 1
+    }
+
+    /* --- grip meter: aperture → low-pass cutoff --- */
     #ap-fill {
       position: absolute;
       inset: 1px auto 1px 1px;
@@ -251,38 +402,10 @@
     .meter-ticks {
       display: flex;
       justify-content: space-between;
-      font-size: 9px;
+      font-size: 8px;
       opacity: .4;
+      letter-spacing: .18em;
       margin-top: 3px
-    }
-
-    #hud-motion .val.right {
-      float: right
-    }
-
-    #hud-motion .trem-label {
-      margin-top: 10px;
-      display: flex;
-      justify-content: space-between;
-      align-items: baseline;
-    }
-
-    #hud-motion .trem-label .val {
-      opacity: 1;
-      letter-spacing: .08em;
-    }
-
-    #hud-motion .trem-label.test .val {
-      color: #4bffb4;
-      text-shadow: 0 0 8px rgba(75, 255, 180, .55);
-    }
-
-    #hud-motion .rot-label {
-      margin-top: 8px
-    }
-
-    #hud-aperture {
-      width: 100%
     }
 
     #hud-br {
@@ -637,21 +760,37 @@
   <button class="btn ghost" id="btn-sound" type="button">SOUND OFF</button>
 
   <div class="hud" id="hud-bl">
-    <div id="hud-motion">
-      <div class="row">
-        <span class="lbl">POS X <span id="pos-x-val" class="val">0.00</span></span>
-        <span class="lbl">POS Y <span id="pos-y-val" class="val">0.00</span></span>
-        <span class="lbl">POS Z <span id="pos-z-val" class="val">0.00</span></span>
+
+    <div class="fx-module" id="pad-module">
+      <div class="fx-title lbl"><span>HAND POS X/Y</span><span class="val" id="pos-xy-val">0.00 / 0.00</span></div>
+      <div id="xy-grid">
+        <span class="pad-edge top">▲ FORMANT BRIGHT</span>
+        <span class="pad-edge left">◀ PAN LEFT</span>
+        <div id="xy-pad">
+          <div id="xy-line-v"></div>
+          <div id="xy-line-h"></div>
+          <div id="xy-dot"></div>
+        </div>
+        <span class="pad-edge right">PAN RIGHT ▶</span>
+        <span class="pad-edge bottom">▼ FORMANT DARK</span>
       </div>
-      <div class="lbl rot-label">ROTATION <span id="rot-deg-val" class="val right">0.0°</span></div>
+      <div class="fx-readout">
+        <span>PAN <span class="val" id="pan-val">C</span></span>
+        <span>FORMANT <span class="val" id="formant-val">—</span></span>
+      </div>
+    </div>
+
+    <div class="fx-module" id="rot-module">
+      <div class="fx-split-lbl"><span>◀ CCW</span><span class="val" id="rot-deg-val">0.0°</span><span>CW ▶</span></div>
       <div class="meter-bar" id="rot-bar">
-        <div id="rot-center"></div>
-        <div id="rot-fill"></div>
+        <div id="rot-dead"></div>
+        <div id="delay-fill"></div>
+        <div id="trem-fill"></div>
+        <div id="rot-needle"></div>
       </div>
-      <div class="meter-ticks" id="rot-ticks"><span>-70°</span><span>0°</span><span>+70°</span></div>
-      <div class="lbl trem-label" id="trem-label">
-        <span>TREMOLO <span id="trem-hz-val" class="val">—</span></span>
-        <span id="trem-depth-val" class="val">DEPTH —</span>
+      <div class="fx-readout">
+        <span>DELAY <span class="val" id="delay-val">0%</span></span>
+        <span id="trem-label">TREM <span class="val" id="trem-val">—</span> · DET <span class="val" id="detune-val">0¢</span></span>
       </div>
     </div>
 
@@ -660,12 +799,12 @@
       <input type="range" id="manual-slider" min="0" max="100" value="55">
     </div>
 
-    <div id="hud-aperture">
-      <div class="lbl">APERTURE <span id="ap-val" class="val" style="float:right">—</span></div>
+    <div class="fx-module" id="hud-aperture">
+      <div class="fx-title lbl"><span>GRIP <span id="ap-val" class="val">—</span></span><span>LO-PASS <span class="val" id="lp-val">—</span></span></div>
       <div class="meter-bar" id="ap-bar">
         <div id="ap-fill"></div>
       </div>
-      <div class="meter-ticks" id="ap-ticks"><span>FIST</span><span>50</span><span>OPEN</span></div>
+      <div class="meter-ticks" id="ap-ticks"><span>◀ FIST · MUFFLED</span><span>OPEN · FULL MIX ▶</span></div>
     </div>
   </div>
 
@@ -673,6 +812,7 @@
     <div>ROT <span id="rot-val">0.00</span> RAD <span id="orient-val" style="opacity:.6">AUTO</span></div>
     <div>PARTICLES 12,000</div>
     <div>MODE <span id="mode-val">STANDBY</span></div>
+    <div>FEED <span id="feed-val">OFF</span> <span style="opacity:.45">[C]</span></div>
   </div>
 
   <div id="cam-wrap">
@@ -716,6 +856,7 @@
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
     renderer.setSize(innerWidth, innerHeight);
+    renderer.autoClear = false; // the camera backdrop pass draws first each frame
     stage.appendChild(renderer.domElement);
 
     const scene = new THREE.Scene();
@@ -1089,6 +1230,168 @@
     }`
     });
     scene.add(new THREE.Points(dustGeo, dustMat));
+
+    /* ============================================================
+       2b. PERFORMER FEED — the camera as a holographic backdrop
+       The webcam is drawn as a full-screen pass *behind* the sphere, but it
+       never arrives as raw video: the shader keeps only luminance, crushes the
+       room to black, re-tints it to the cyan/violet palette and (per mode) adds
+       sobel edges + contour bands so the face reads as a projection, not a
+       photo. Two automatic guards keep the sphere clean:
+         · core well  — the feed fades out inside the sphere's projected disc
+         · open duck  — overall feed level drops as the sphere blooms open,
+                        so the face recedes exactly when the sphere is biggest
+       ============================================================ */
+    const FEED_MODES = [
+      { name: 'OFF', style: [0, 0, 0], level: 0, cut: 0 },
+      // soft luminance ghost — face present, nothing competing for attention
+      { name: 'GHOST', style: [1.0, 0.30, 0.0], level: 0.60, cut: 0.85 },
+      // topographic: banded luminance contours, strongest "hologram" read
+      { name: 'SCAN', style: [0.50, 0.55, 0.90], level: 0.80, cut: 0.70 },
+      // edges only — sparsest, leaves the projection almost untouched
+      { name: 'EDGE', style: [0.10, 1.00, 0.25], level: 1.00, cut: 0.50 },
+    ];
+
+    const feed = {
+      tex: null, mode: 0, gain: 1,
+      style: new THREE.Vector3(), level: 0, cut: 0,
+    };
+
+    const feedUniforms = {
+      uTex: { value: null },
+      uTime: sphereUniforms.uTime,
+      uAspect: { value: innerWidth / innerHeight },
+      uTexAspect: { value: 4 / 3 },
+      uStep: { value: new THREE.Vector2(1.5 / 640, 1.5 / 480) },
+      uStyle: { value: new THREE.Vector3() },   // (fill, edge, band)
+      uLevel: { value: 0 },
+      uCore: { value: new THREE.Vector3(0.5, 0.5, 0.3) }, // screen uv + radius
+      uCoreCut: { value: 0 },
+    };
+
+    const feedMat = new THREE.ShaderMaterial({
+      uniforms: feedUniforms,
+      depthTest: false, depthWrite: false,
+      vertexShader: `
+    varying vec2 vUv;
+    void main(){ vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`,
+      fragmentShader: `
+    precision highp float;
+    varying vec2 vUv;
+    uniform sampler2D uTex;
+    uniform vec2 uStep;
+    uniform vec3 uStyle, uCore;
+    uniform float uTime, uAspect, uTexAspect, uLevel, uCoreCut;
+
+    const vec3 C_DEEP = vec3(0.03, 0.11, 0.24);
+    const vec3 C_CYAN = vec3(0.29, 0.91, 1.00);
+    const vec3 C_VIOL = vec3(0.54, 0.48, 1.00);
+
+    float lum(vec2 uv){ return dot(texture2D(uTex, uv).rgb, vec3(0.299, 0.587, 0.114)); }
+
+    void main(){
+      /* object-fit:cover crop, mirrored to match the preview */
+      vec2 f = uTexAspect > uAspect
+        ? vec2(uAspect / uTexAspect, 1.0)
+        : vec2(1.0, uTexAspect / uAspect);
+      vec2 tuv = (vec2(1.0 - vUv.x, vUv.y) - 0.5) * f + 0.5;
+
+      float l = lum(tuv);
+      float fill = pow(smoothstep(0.17, 0.84, l), 1.35);
+
+      /* sobel edges — the contour of the face against the dark room */
+      float e = 0.0;
+      if (uStyle.y > 0.002) {
+        vec2 o = uStep;
+        float tl = lum(tuv + vec2(-o.x, o.y)), tc = lum(tuv + vec2(0.0, o.y)), tr = lum(tuv + o);
+        float ml = lum(tuv + vec2(-o.x, 0.0)), mr = lum(tuv + vec2(o.x, 0.0));
+        float bl = lum(tuv - o), bc = lum(tuv - vec2(0.0, o.y)), br = lum(tuv + vec2(o.x, -o.y));
+        float gx = tl + 2.0 * ml + bl - tr - 2.0 * mr - br;
+        float gy = tl + 2.0 * tc + tr - bl - 2.0 * bc - br;
+        e = smoothstep(0.10, 0.52, length(vec2(gx, gy)));
+      }
+
+      /* contour bands across the luminance ramp */
+      float fr = fract(fill * 7.0);
+      float band = (1.0 - smoothstep(0.0, 0.13, min(fr, 1.0 - fr))) * fill;
+
+      float amt = uStyle.x * fill * 0.55 + uStyle.y * e * 0.95 + uStyle.z * band * 0.75;
+
+      /* projector texture: fine scanlines + a slow roll bar */
+      float scan = 0.74 + 0.26 * sin(vUv.y * 620.0);
+      float roll = 1.0 + 0.22 * exp(-26.0 * abs(fract(vUv.y * 0.5 - uTime * 0.05) - 0.5));
+      amt *= scan * roll;
+
+      /* core well — hollow the feed out where the sphere lives */
+      vec2 d = (vUv - uCore.xy) * vec2(uAspect, 1.0);
+      float well = smoothstep(0.35, 1.15, length(d) / max(uCore.z, 1e-3));
+      amt *= mix(1.0, well, uCoreCut);
+      amt = clamp(amt, 0.0, 1.4);
+
+      vec3 col = mix(C_DEEP, C_CYAN, clamp(amt * 1.3, 0.0, 1.0));
+      col = mix(col, C_VIOL, clamp((amt - 0.65) * 1.6, 0.0, 1.0) * 0.5);
+      col *= amt * uLevel;
+
+      /* keep the room's base gradient underneath so black is never flat */
+      vec3 base = vec3(0.010, 0.028, 0.052) * (1.0 - 0.75 * length((vUv - vec2(0.5, 0.62)) * vec2(uAspect, 1.0)));
+      gl_FragColor = vec4(max(base, vec3(0.0)) + col, 1.0);
+    }`
+    });
+
+    const feedScene = new THREE.Scene();
+    const feedCam = new THREE.Camera();
+    const feedQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), feedMat);
+    feedQuad.frustumCulled = false;
+    feedScene.add(feedQuad);
+
+    /* the tracking <video> is already decoding — reuse it as the texture */
+    function attachFeedSource(video) {
+      feed.tex = new THREE.VideoTexture(video);
+      feed.tex.minFilter = THREE.LinearFilter;
+      feed.tex.magFilter = THREE.LinearFilter;
+      feed.tex.format = THREE.RGBFormat;
+      feedUniforms.uTex.value = feed.tex;
+      setFeedMode(1); // come up as a ghost so the performer is in frame by default
+    }
+
+    function setFeedMode(i) {
+      feed.mode = (i + FEED_MODES.length) % FEED_MODES.length;
+      $('feed-val').textContent = FEED_MODES[feed.mode].name;
+    }
+
+    const _feedC = new THREE.Vector3(), _feedE = new THREE.Vector3();
+
+    /* returns true when the backdrop pass has anything worth drawing */
+    function updateFeed(dt) {
+      if (!feed.tex) return false;
+      const m = FEED_MODES[feed.mode];
+      const k = Math.min(1, dt * 4);
+
+      _feedE.set(m.style[0], m.style[1], m.style[2]);
+      feed.style.lerp(_feedE, k);
+      // duck the feed as the sphere blooms — face recedes when the sphere owns the frame
+      const targetLevel = m.level * feed.gain * (1 - 0.45 * state.openness);
+      feed.level += (targetLevel - feed.level) * k;
+      feed.cut += (m.cut * (0.65 + 0.35 * state.openness) - feed.cut) * k;
+      if (feed.level < 0.004) return false;
+
+      /* project the sphere to screen space so the well tracks it */
+      _feedC.copy(sphere.position).project(camera);
+      const cx = _feedC.x * 0.5 + 0.5, cy = _feedC.y * 0.5 + 0.5;
+      _feedE.set(1, 0, 0).applyQuaternion(camera.quaternion)
+        .multiplyScalar(state.radius * 0.55).add(sphere.position).project(camera);
+      const rx = (_feedE.x * 0.5 + 0.5 - cx) * feedUniforms.uAspect.value;
+      const ry = (_feedE.y * 0.5 + 0.5 - cy);
+      feedUniforms.uCore.value.set(cx, cy, THREE.MathUtils.clamp(Math.hypot(rx, ry), 0.08, 0.75));
+
+      const vw = feed.tex.image.videoWidth || 640, vh = feed.tex.image.videoHeight || 480;
+      feedUniforms.uTexAspect.value = vw / vh;
+      feedUniforms.uStep.value.set(1.5 / vw, 1.5 / vh);
+      feedUniforms.uStyle.value.copy(feed.style);
+      feedUniforms.uLevel.value = feed.level;
+      feedUniforms.uCoreCut.value = feed.cut;
+      return true;
+    }
 
     /* ============================================================
        3. CONTROL STATE — hand tracking / mouse fallback
@@ -1673,7 +1976,8 @@
       // pan follows left/right position — normalize by input span so hand
       // (±HAND_X_EXTENT) and mouse (±MOUSE_X_EXTENT) both reach full stereo
       const panSpan = (state.mode === 'gesture' && state.hasHand) ? HAND_X_EXTENT : MOUSE_X_EXTENT;
-      audio.panner.pan.setTargetAtTime(THREE.MathUtils.clamp(state.tx / panSpan, -1, 1), now, RAMP);
+      const panVal = THREE.MathUtils.clamp(state.tx / panSpan, -1, 1);
+      audio.panner.pan.setTargetAtTime(panVal, now, RAMP);
 
       // formant/wah follows height — same span-normalize idea as pan so hand
       // (±HAND_Y_EXTENT) and mouse (±MOUSE_Y_EXTENT) both sweep the full
@@ -1687,7 +1991,12 @@
       // grip sweeps the mix-wide lowpass — exponential mapping so the sweep
       // feels even across the range: fist ≈ 160 Hz (deep, muffled, all bass
       // and kick), open ≈ 12 kHz (everything back in)
-      audio.gripLP.frequency.setTargetAtTime(160 * Math.pow(12000 / 160, state.openness), now, RAMP);
+      const lpHz = 160 * Math.pow(12000 / 160, state.openness);
+      audio.gripLP.frequency.setTargetAtTime(lpHz, now, RAMP);
+
+      // live effect amounts for the bottom-left HUD — includes the motion
+      // charge that a tilt-only estimate can't see
+      audio.fx = { pan: panVal, formantHz, echoAmt, vibCents: vibratoCents, tremStrength: strength, lpHz };
       scheduleBeats();
 
       // fast open/close snap → percussive pluck
@@ -2024,33 +2333,60 @@
         state.targetHandAngle = THREE.MathUtils.clamp(state.targetHandAngle + change, -MAX_HAND_ANGLE, MAX_HAND_ANGLE);
     }
 
-    /* ----- bottom-left HUD: live hand X/Y, rotation, tremolo ----- */
-    const ROT_BAR_MAX_DEG = 70; // keep in sync with MAX_HAND_ANGLE and the tick labels
+    /* ----- bottom-left HUD: hand states + the effects they drive ----- */
+    const ROT_BAR_MAX_DEG = 70; // keep in sync with MAX_HAND_ANGLE
+    const fmtHz = h => h >= 1000 ? (h / 1000).toFixed(1) + 'kHz' : Math.round(h) + 'Hz';
     function updateMotionHUD() {
-      $('pos-x-val').textContent = state.tx.toFixed(2);
-      $('pos-y-val').textContent = state.ty.toFixed(2);
-      $('pos-z-val').textContent = state.tz.toFixed(2);
+      const live = audio.enabled && audio.fx;
 
-      // shown clockwise-positive: CW tilt reads +° and fills rightward,
-      // CCW tilt reads -° and fills leftward (handAngle itself is CCW-positive)
+      /* XY pad — x → stereo pan, y → formant color; the dot IS both meters */
+      const xSpan = (state.mode === 'gesture' && state.hasHand) ? HAND_X_EXTENT : MOUSE_X_EXTENT;
+      const ySpan = (state.mode === 'gesture' && state.hasHand) ? HAND_Y_EXTENT : MOUSE_Y_EXTENT;
+      const xN = THREE.MathUtils.clamp(state.tx / xSpan, -1, 1);
+      const yN = THREE.MathUtils.clamp((state.ty - Y_CENTER) / ySpan, -1, 1);
+      $('pos-xy-val').textContent = state.tx.toFixed(2) + ' / ' + state.ty.toFixed(2);
+      const px = (xN + 1) / 2 * 100, py = (1 - (yN + 1) / 2) * 100;
+      $('xy-dot').style.left = px + '%'; $('xy-dot').style.top = py + '%';
+      $('xy-line-v').style.left = px + '%'; $('xy-line-h').style.top = py + '%';
+      $('pan-val').textContent = Math.abs(xN) < 0.005 ? 'C' : (xN < 0 ? 'L' : 'R') + Math.round(Math.abs(xN) * 100);
+      const formantHz = live ? audio.fx.formantHz : 350 * Math.pow(3200 / 350, (yN + 1) / 2);
+      $('formant-val').textContent = fmtHz(formantHz);
+
+      /* rotation gauge — bright needle = hand angle (CW-positive display);
+         wings fill with the effect each direction drives */
       const deg = -THREE.MathUtils.radToDeg(state.handAngle);
       $('rot-deg-val').textContent = (deg >= 0 ? '+' : '') + deg.toFixed(1) + '°';
-
-      const halfPct = THREE.MathUtils.clamp(Math.abs(deg) / ROT_BAR_MAX_DEG, 0, 1) * 50;
-      const fill = $('rot-fill');
-      fill.style.left = (deg >= 0 ? 50 : 50 - halfPct) + '%';
-      fill.style.width = halfPct + '%';
-
-      const tremLabel = $('trem-label');
-      if (audio.enabled) {
-        $('trem-hz-val').textContent = Math.round(audio.tremBpm) + ' BPM';
-        $('trem-depth-val').textContent = 'DEPTH ' + Math.round(audio.tremDepthAmt * 100) + '%';
-        tremLabel.classList.toggle('test', audio.tremTest);
+      $('rot-needle').style.left = (50 + THREE.MathUtils.clamp(deg / ROT_BAR_MAX_DEG, -1, 1) * 50) + '%';
+      let echoAmt, tremStrength, vibCents, tremBpm, tremDepth;
+      if (live) {
+        ({ echoAmt, tremStrength, vibCents } = audio.fx);
+        tremBpm = audio.tremBpm; tremDepth = audio.tremDepthAmt;
       } else {
-        $('trem-hz-val').textContent = '—';
-        $('trem-depth-val').textContent = 'DEPTH —';
-        tremLabel.classList.remove('test');
+        // sound off → tilt-only preview so the gauge still shows the mapping
+        const dead = THREE.MathUtils.degToRad(TILT_DEADZONE_DEG);
+        const mag = Math.abs(state.handAngle) <= dead ? 0 :
+          THREE.MathUtils.clamp((Math.abs(state.handAngle) - dead) / (MAX_HAND_ANGLE - dead), 0, 1);
+        echoAmt = state.handAngle > 0 ? mag : 0;       // CCW / left tilt
+        tremStrength = state.handAngle < 0 ? mag : 0;  // CW / right tilt
+        vibCents = tremStrength * VIBRATO_CENTS_MAX;
+        tremBpm = TREM_BPM_MIN + tremStrength * (TREM_BPM_MAX - TREM_BPM_MIN);
+        tremDepth = tremStrength > 0.001 ? TREM_DEPTH_MIN + tremStrength * (TREM_DEPTH_MAX - TREM_DEPTH_MIN) : 0;
       }
+      $('delay-fill').style.left = (50 - echoAmt * 50) + '%';
+      $('delay-fill').style.width = echoAmt * 50 + '%';
+      $('trem-fill').style.width = tremStrength * 50 + '%';
+      $('delay-val').textContent = Math.round(echoAmt * 100) + '%';
+      $('trem-val').textContent = tremDepth > 0.001
+        ? Math.round(tremBpm) + 'BPM ' + Math.round(tremDepth * 100) + '%'
+        : 'OFF';
+      $('detune-val').textContent = Math.round(vibCents) + '¢';
+      $('trem-label').classList.toggle('test', !!(audio.enabled && audio.tremTest));
+
+      /* grip meter — aperture sweeps the mix-wide low-pass cutoff */
+      const pct = Math.round(state.openness * 100);
+      $('ap-fill').style.width = pct + '%';
+      $('ap-val').textContent = state.mode === 'standby' ? '—' : pct.toString().padStart(3, '0');
+      $('lp-val').textContent = state.mode === 'standby' ? '—' : fmtHz(160 * Math.pow(12000 / 160, state.openness));
     }
 
     /* ----- debug readout (press D): raw metric for calibration ----- */
@@ -2071,6 +2407,18 @@
         debugOn = !debugOn;
         $('debug').classList.toggle('on', debugOn);
         toast(debugOn ? 'DEBUG ON — EXT IS THE RAW VALUE TO CALIBRATE' : 'DEBUG OFF');
+      }
+      // C cycles the camera backdrop; [ / ] trim how much of it shows through
+      if (e.key === 'c' || e.key === 'C') {
+        if (!feed.tex) { toast('NO OPTICAL FEED — START WITH CAMERA TO USE BACKDROP'); return; }
+        setFeedMode(feed.mode + 1);
+        toast(`FEED ${FEED_MODES[feed.mode].name}`);
+        return;
+      }
+      if (e.key === '[' || e.key === ']') {
+        feed.gain = THREE.MathUtils.clamp(feed.gain + (e.key === ']' ? 0.15 : -0.15), 0, 1.6);
+        toast(`FEED GAIN ${Math.round(feed.gain * 100)}%`);
+        return;
       }
       if (e.key === 't' || e.key === 'T') {
         audio.tremTest = !audio.tremTest;
@@ -2207,14 +2555,17 @@
         });
         const cam = new Camera(video, {
           onFrame: async () => { await hands.send({ image: video }); },
-          width: 480, height: 360
+          // 4:3 kept (aspect feeds the span/tilt calibration); resolution raised
+          // so the same stream is sharp enough to use as the full-screen backdrop
+          width: 960, height: 720
         });
         await cam.start();
         $('cam-wrap').classList.add('on');
         positionSoundButton();
+        attachFeedSource(video);
         state.mode = 'gesture';
         $('mode-val').textContent = 'GESTURE';
-        toast('OPTICAL FEED ONLINE — SHOW YOUR HAND');
+        toast('OPTICAL FEED ONLINE — SHOW YOUR HAND · [C] BACKDROP');
       } catch (err) {
         console.warn(err);
         toast('CAMERA UNAVAILABLE — SWITCHING TO MOUSE MODE');
@@ -2351,9 +2702,6 @@
       camera.lookAt(0, 0.4, 0);
 
       /* HUD */
-      const pct = Math.round(state.openness * 100);
-      $('ap-fill').style.width = pct + '%';
-      $('ap-val').textContent = state.mode === 'standby' ? '—' : pct.toString().padStart(3, '0');
       const _euler = new THREE.Euler().setFromQuaternion(sphere.quaternion, 'YXZ');
       $('rot-val').textContent = (_euler.z % (Math.PI * 2)).toFixed(2);
       $('orient-val').textContent = (state.mode === 'gesture' && state.hasHand) ? 'HAND Z+Y' : 'AUTO Y';
@@ -2370,6 +2718,9 @@
       updateAudio(dt);
       updateMotionHUD();
 
+      const drawFeed = updateFeed(dt);
+      renderer.clear();
+      if (drawFeed) renderer.render(feedScene, feedCam);
       renderer.render(scene, camera);
     }
     animate();
@@ -2378,6 +2729,7 @@
       camera.aspect = innerWidth / innerHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(innerWidth, innerHeight);
+      feedUniforms.uAspect.value = innerWidth / innerHeight;
     });
   </script>
 </body>
